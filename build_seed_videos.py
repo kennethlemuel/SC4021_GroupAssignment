@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from collections import Counter
 from typing import Any
 
@@ -42,6 +43,24 @@ SEED_COLUMNS = [
 ]
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build deterministic YouTube seed videos for the smartphone opinion dataset."
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append new seed videos to the existing dataset instead of replacing it.",
+    )
+    return parser.parse_args()
+
+
+def load_existing_seed_df(append: bool) -> pd.DataFrame:
+    if append and SEED_VIDEOS_PATH.exists():
+        return pd.read_csv(SEED_VIDEOS_PATH)
+    return pd.DataFrame(columns=SEED_COLUMNS)
+
+
 def search_video_ids(
     session: requests.Session,
     api_key: str,
@@ -54,32 +73,19 @@ def search_video_ids(
 
     while len(video_ids) < max_results:
         page_size = min(50, max_results - len(video_ids))
-        response = youtube_get(
-            session=session,
-            endpoint="search",
-            api_key=api_key,
-            params={
-                "part": "snippet",
-                "q": search_query,
-                "type": "video",
-                "maxResults": page_size,
-                "order": "relevance",
-                "relevanceLanguage": "en",
-                "publishedAfter": PUBLISHED_AFTER,
-                "pageToken": next_page_token,
-            }
-            if next_page_token
-            else {
-                "part": "snippet",
-                "q": search_query,
-                "type": "video",
-                "maxResults": page_size,
-                "order": "relevance",
-                "relevanceLanguage": "en",
-                "publishedAfter": PUBLISHED_AFTER,
-            },
-        )
+        params: dict[str, Any] = {
+            "part": "snippet",
+            "q": search_query,
+            "type": "video",
+            "maxResults": page_size,
+            "order": "relevance",
+            "relevanceLanguage": "en",
+            "publishedAfter": PUBLISHED_AFTER,
+        }
+        if next_page_token:
+            params["pageToken"] = next_page_token
 
+        response = youtube_get(session=session, endpoint="search", api_key=api_key, params=params)
         items = response.get("items", [])
         if not items:
             break
@@ -119,23 +125,45 @@ def fetch_video_details(
     return details
 
 
-def build_seed_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_seed_rows(existing_seed_df: pd.DataFrame) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     api_key = load_api_key()
     session = build_session()
     search_results_per_query = get_env_int("SEARCH_RESULTS_PER_QUERY", DEFAULT_SEARCH_RESULTS_PER_QUERY)
     keep_per_query = get_env_int("KEEP_PER_QUERY", DEFAULT_KEEP_PER_QUERY)
     max_per_channel = get_env_int("MAX_PER_CHANNEL_PER_BUCKET", DEFAULT_MAX_PER_CHANNEL_PER_BUCKET)
 
-    global_selected_video_ids: set[str] = set()
+    global_selected_video_ids: set[str] = set(existing_seed_df["video_id"].astype(str)) if not existing_seed_df.empty else set()
     seed_rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
 
     for bucket_rule in tqdm(BUCKET_RULES, desc="Buckets"):
-        channel_counts = Counter()
+        existing_bucket_df = existing_seed_df[existing_seed_df["bucket"] == bucket_rule.bucket]
+        channel_counts = Counter(existing_bucket_df["channel_title"].dropna().tolist())
 
         for category, template in QUERY_TEMPLATES:
             search_query = template.format(term=bucket_rule.query_term)
+            existing_for_query_df = existing_bucket_df[existing_bucket_df["category"] == category]
+            existing_for_query = len(existing_for_query_df)
             selected_for_query = 0
+
+            if existing_for_query >= keep_per_query:
+                summary_rows.append(
+                    {
+                        "bucket": bucket_rule.bucket,
+                        "family": bucket_rule.family,
+                        "variant": bucket_rule.variant,
+                        "category": category,
+                        "search_query": search_query,
+                        "search_results_requested": search_results_per_query,
+                        "search_results_returned": 0,
+                        "already_present": existing_for_query,
+                        "selected_this_run": 0,
+                        "selected_total_after_run": existing_for_query,
+                        "unique_channels": len(set(existing_bucket_df["channel_title"].dropna().tolist())),
+                        "error": "",
+                    }
+                )
+                continue
 
             try:
                 candidate_ids = search_video_ids(
@@ -155,15 +183,17 @@ def build_seed_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                         "search_query": search_query,
                         "search_results_requested": search_results_per_query,
                         "search_results_returned": 0,
-                        "selected_videos": 0,
-                        "unique_channels": 0,
+                        "already_present": existing_for_query,
+                        "selected_this_run": 0,
+                        "selected_total_after_run": existing_for_query,
+                        "unique_channels": len(set(existing_bucket_df["channel_title"].dropna().tolist())),
                         "error": str(exc),
                     }
                 )
                 continue
 
             for video_id in candidate_ids:
-                if selected_for_query >= keep_per_query:
+                if existing_for_query + selected_for_query >= keep_per_query:
                     break
                 if video_id in global_selected_video_ids:
                     continue
@@ -203,7 +233,9 @@ def build_seed_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                 channel_counts[channel_title] += 1
                 selected_for_query += 1
 
-            selected_rows = [row for row in seed_rows if row["bucket"] == bucket_rule.bucket and row["category"] == category]
+            new_selected_rows = [
+                row for row in seed_rows if row["bucket"] == bucket_rule.bucket and row["category"] == category
+            ]
             summary_rows.append(
                 {
                     "bucket": bucket_rule.bucket,
@@ -213,8 +245,13 @@ def build_seed_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                     "search_query": search_query,
                     "search_results_requested": search_results_per_query,
                     "search_results_returned": len(candidate_ids),
-                    "selected_videos": selected_for_query,
-                    "unique_channels": len({row["channel_title"] for row in selected_rows}),
+                    "already_present": existing_for_query,
+                    "selected_this_run": selected_for_query,
+                    "selected_total_after_run": existing_for_query + selected_for_query,
+                    "unique_channels": len(
+                        set(existing_bucket_df["channel_title"].dropna().tolist())
+                        | {row["channel_title"] for row in new_selected_rows}
+                    ),
                     "error": "",
                 }
             )
@@ -222,8 +259,10 @@ def build_seed_rows() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return seed_rows, summary_rows
 
 
-def save_outputs(seed_rows: list[dict[str, Any]], summary_rows: list[dict[str, Any]]) -> None:
-    seed_df = pd.DataFrame(seed_rows, columns=SEED_COLUMNS).drop_duplicates(subset=["video_id"])
+def save_outputs(existing_seed_df: pd.DataFrame, seed_rows: list[dict[str, Any]], summary_rows: list[dict[str, Any]]) -> None:
+    new_seed_df = pd.DataFrame(seed_rows, columns=SEED_COLUMNS)
+    seed_df = pd.concat([existing_seed_df, new_seed_df], ignore_index=True)
+    seed_df = seed_df.drop_duplicates(subset=["video_id"], keep="first")
     seed_df.sort_values(by=["bucket", "category", "published_at", "video_id"], inplace=True)
     seed_df.to_csv(SEED_VIDEOS_PATH, index=False)
 
@@ -234,9 +273,13 @@ def save_outputs(seed_rows: list[dict[str, Any]], summary_rows: list[dict[str, A
 
 def main() -> None:
     ensure_directories()
-    seed_rows, summary_rows = build_seed_rows()
-    save_outputs(seed_rows=seed_rows, summary_rows=summary_rows)
-    print(f"Saved {len(seed_rows)} selected videos to {SEED_VIDEOS_PATH}.")
+    args = parse_args()
+    existing_seed_df = load_existing_seed_df(append=args.append)
+    before_count = len(existing_seed_df)
+    seed_rows, summary_rows = build_seed_rows(existing_seed_df=existing_seed_df)
+    save_outputs(existing_seed_df=existing_seed_df, seed_rows=seed_rows, summary_rows=summary_rows)
+    print(f"Saved {before_count + len(seed_rows)} total selected videos to {SEED_VIDEOS_PATH}.")
+    print(f"Added {len(seed_rows)} new seed videos in this run.")
     print(f"Saved discovery summary to {SEED_SUMMARY_PATH}.")
 
 

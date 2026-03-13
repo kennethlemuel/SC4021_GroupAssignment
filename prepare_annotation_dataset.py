@@ -101,6 +101,44 @@ OPINION_PATTERNS = (
     r"\bprefer\b",
 )
 
+POSITIVE_PATTERNS = (
+    r"\blove\b",
+    r"\blike\b",
+    r"\bgood\b",
+    r"\bgreat\b",
+    r"\bamazing\b",
+    r"\bexcellent\b",
+    r"\bsolid\b",
+    r"\bbetter\b",
+    r"\bbest\b",
+    r"\bworth\b",
+    r"\brecommend\b",
+    r"\bimpress",
+    r"\benjoy",
+    r"\bfast\b",
+    r"\bsmooth\b",
+)
+
+NEGATIVE_PATTERNS = (
+    r"\bhate\b",
+    r"\bbad\b",
+    r"\bterrible\b",
+    r"\bawful\b",
+    r"\bworse\b",
+    r"\bworst\b",
+    r"\bdisappoint",
+    r"\bunderwhelm",
+    r"\bpoor\b",
+    r"\boverheat",
+    r"\bheat\b",
+    r"\bbug\b",
+    r"\bissue\b",
+    r"\bproblem\b",
+    r"\blag\b",
+    r"\btrash\b",
+    r"\bregret\b",
+)
+
 COMPARISON_PATTERNS = (
     r"\bvs\b",
     r"\bversus\b",
@@ -214,6 +252,33 @@ def score_comment(text: str, bucket: str) -> dict[str, object]:
     }
 
 
+def suggest_sentiment_label(text: str) -> dict[str, object]:
+    lowered = (text or "").casefold()
+    positive_score = count_matches(lowered, POSITIVE_PATTERNS)
+    negative_score = count_matches(lowered, NEGATIVE_PATTERNS)
+
+    if negative_score >= positive_score + 2 and negative_score >= 2:
+        suggestion = "negative"
+    elif positive_score >= negative_score + 2 and positive_score >= 2:
+        suggestion = "positive"
+    else:
+        suggestion = "neutral"
+
+    if max(positive_score, negative_score) >= 3:
+        confidence = "high"
+    elif max(positive_score, negative_score) >= 1:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "suggested_sentiment_label": suggestion,
+        "sentiment_positive_score": positive_score,
+        "sentiment_negative_score": negative_score,
+        "suggestion_confidence": confidence,
+    }
+
+
 def load_comments() -> pd.DataFrame:
     if not COMMENTS_CLEAN_PATH.exists():
         raise FileNotFoundError(
@@ -225,11 +290,12 @@ def load_comments() -> pd.DataFrame:
     return comments_df
 
 
-def build_outputs(comments_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_outputs(comments_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     scored_records = []
     for row in comments_df.to_dict(orient="records"):
         scored_row = dict(row)
         scored_row.update(score_comment(text=row["text"], bucket=row["bucket"]))
+        scored_row.update(suggest_sentiment_label(text=row["text"]))
         scored_records.append(scored_row)
 
     scored_df = pd.DataFrame(scored_records)
@@ -285,11 +351,7 @@ def save_outputs(
     summary_df.to_csv(RELEVANCE_SUMMARY_PATH, index=False)
 
     if limit_per_bucket is not None:
-        annotation_export = (
-            annotation_df.groupby("bucket", group_keys=False)
-            .head(limit_per_bucket)
-            .reset_index(drop=True)
-        )
+        annotation_export = annotation_df.groupby("bucket", group_keys=False).head(limit_per_bucket).reset_index(drop=True)
     else:
         annotation_export = annotation_df.reset_index(drop=True)
 

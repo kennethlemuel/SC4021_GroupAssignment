@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from typing import Any
 
 import pandas as pd
@@ -46,6 +47,16 @@ RAW_COLUMNS = CLEAN_COLUMNS + ["text_normalized"]
 ERROR_COLUMNS = ["video_id", "video_title", "stage", "parent_id", "status_code", "message"]
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Crawl YouTube comments and replies for seed videos.")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append new crawl results to existing outputs instead of replacing them.",
+    )
+    return parser.parse_args()
+
+
 def load_seed_videos() -> pd.DataFrame:
     if not SEED_VIDEOS_PATH.exists():
         raise FileNotFoundError(
@@ -56,6 +67,12 @@ def load_seed_videos() -> pd.DataFrame:
     if seed_df.empty:
         raise RuntimeError(f"{SEED_VIDEOS_PATH} exists but contains no videos to crawl.")
     return seed_df
+
+
+def load_existing_df(path, columns: list[str], append: bool) -> pd.DataFrame:
+    if append and path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame(columns=columns)
 
 
 def build_comment_row(
@@ -100,23 +117,15 @@ def fetch_replies(
 
     while True:
         try:
-            response = youtube_get(
-                session=session,
-                endpoint="comments",
-                api_key=api_key,
-                params={
-                    "part": "snippet",
-                    "parentId": parent_id,
-                    "maxResults": 100,
-                    "pageToken": next_page_token,
-                }
-                if next_page_token
-                else {
-                    "part": "snippet",
-                    "parentId": parent_id,
-                    "maxResults": 100,
-                },
-            )
+            params: dict[str, Any] = {
+                "part": "snippet",
+                "parentId": parent_id,
+                "maxResults": 100,
+            }
+            if next_page_token:
+                params["pageToken"] = next_page_token
+
+            response = youtube_get(session=session, endpoint="comments", api_key=api_key, params=params)
         except requests.RequestException as exc:
             status_code = getattr(getattr(exc, "response", None), "status_code", "")
             errors.append(
@@ -237,14 +246,22 @@ def clean_comments(raw_df: pd.DataFrame) -> pd.DataFrame:
     return cleaned.reset_index(drop=True)
 
 
-def save_outputs(raw_rows: list[dict[str, Any]], error_rows: list[dict[str, Any]]) -> None:
-    raw_df = pd.DataFrame(raw_rows, columns=RAW_COLUMNS)
+def save_outputs(
+    existing_raw_df: pd.DataFrame,
+    existing_error_df: pd.DataFrame,
+    raw_rows: list[dict[str, Any]],
+    error_rows: list[dict[str, Any]],
+) -> None:
+    new_raw_df = pd.DataFrame(raw_rows, columns=RAW_COLUMNS)
+    raw_df = pd.concat([existing_raw_df, new_raw_df], ignore_index=True)
+    raw_df = raw_df.drop_duplicates(subset=["comment_id"], keep="first")
     raw_df.to_csv(COMMENTS_RAW_PATH, index=False)
 
     clean_df = clean_comments(raw_df=raw_df)
     clean_df.to_csv(COMMENTS_CLEAN_PATH, index=False)
 
-    error_df = pd.DataFrame(error_rows, columns=ERROR_COLUMNS)
+    new_error_df = pd.DataFrame(error_rows, columns=ERROR_COLUMNS)
+    error_df = pd.concat([existing_error_df, new_error_df], ignore_index=True)
     error_df.to_csv(CRAWL_ERRORS_PATH, index=False)
 
     print(f"Saved {len(raw_df)} raw comment records to {COMMENTS_RAW_PATH}.")
@@ -254,10 +271,13 @@ def save_outputs(raw_rows: list[dict[str, Any]], error_rows: list[dict[str, Any]
 
 def main() -> None:
     ensure_directories()
+    args = parse_args()
     api_key = load_api_key()
     seed_df = load_seed_videos()
     max_thread_pages = get_env_int("MAX_THREAD_PAGES_PER_VIDEO", DEFAULT_MAX_THREAD_PAGES_PER_VIDEO)
     session = build_session()
+    existing_raw_df = load_existing_df(COMMENTS_RAW_PATH, RAW_COLUMNS, append=args.append)
+    existing_error_df = load_existing_df(CRAWL_ERRORS_PATH, ERROR_COLUMNS, append=args.append)
 
     raw_rows: list[dict[str, Any]] = []
     error_rows: list[dict[str, Any]] = []
@@ -272,7 +292,12 @@ def main() -> None:
         raw_rows.extend(rows)
         error_rows.extend(errors)
 
-    save_outputs(raw_rows=raw_rows, error_rows=error_rows)
+    save_outputs(
+        existing_raw_df=existing_raw_df,
+        existing_error_df=existing_error_df,
+        raw_rows=raw_rows,
+        error_rows=error_rows,
+    )
 
 
 if __name__ == "__main__":
