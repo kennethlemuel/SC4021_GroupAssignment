@@ -8,7 +8,7 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
-from youtube_pipeline import (
+from crawler.youtube_pipeline import (
     BUCKET_RULES,
     DEFAULT_KEEP_PER_QUERY,
     DEFAULT_MAX_PER_CHANNEL_PER_BUCKET,

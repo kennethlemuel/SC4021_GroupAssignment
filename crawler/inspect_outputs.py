@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from youtube_pipeline import COMMENTS_CLEAN_PATH, SEED_VIDEOS_PATH
+from crawler.youtube_pipeline import COMMENTS_CLEAN_PATH, SEED_VIDEOS_PATH
 
 
 def read_csv_if_present(path: Path) -> pd.DataFrame | None:

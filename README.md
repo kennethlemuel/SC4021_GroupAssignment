@@ -1,3 +1,10 @@
-# SC4021 Project 
+# SC4021 Project
 
-to be updated
+commands to run crawler:
+
+python -m crawler.build_seed_videos
+python -m crawler.crawl_youtube_comments
+python -m crawler.inspect_outputs
+python -m crawler.prepare_annotation_dataset
+
+

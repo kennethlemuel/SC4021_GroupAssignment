@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from youtube_pipeline import (
+from crawler.youtube_pipeline import (
     ANNOTATION_TEMPLATE_PATH,
     COMMENTS_CLEAN_PATH,
     COMMENTS_RELEVANT_PATH,

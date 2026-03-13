@@ -7,7 +7,7 @@ import pandas as pd
 import requests
 from tqdm import tqdm
 
-from youtube_pipeline import (
+from crawler.youtube_pipeline import (
     COMMENTS_CLEAN_PATH,
     COMMENTS_RAW_PATH,
     CRAWL_ERRORS_PATH,
