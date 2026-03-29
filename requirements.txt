@@ -4,3 +4,7 @@ python-dotenv
 tqdm
 nltk
 emoji
+logging
+pathlib
+typing
+dataclasses
