@@ -2,6 +2,8 @@
 
 Run ```pip install -r requirements.txt``` to install the required dependencies.
 
+Upload model files inside a folder named 'local_finetuned'.
+
 ## Usage
 
 ```python
