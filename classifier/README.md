@@ -2,6 +2,8 @@
 
 Run ```pip install -r requirements.txt``` to install the required dependencies.
 
+Upload model files inside a folder named 'local_finetuned'. Get model files from [this link](https://entuedu-my.sharepoint.com/:f:/g/personal/ivansoji001_e_ntu_edu_sg/IgBRNMXQh2p7SJA0r7E8H3lxASxSlVDXRx2o7QFDxR6kn7M?e=9IDqX1).
+
 ## Usage
 
 ```python
