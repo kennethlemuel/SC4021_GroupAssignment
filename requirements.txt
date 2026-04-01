@@ -2,3 +2,6 @@ requests
 pandas
 python-dotenv
 tqdm
+whoosh
+streamlit
+plotly
