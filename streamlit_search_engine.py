@@ -5,6 +5,7 @@ import re
 import shutil
 import time
 import math
+import html
 from datetime import datetime
 
 import pandas as pd
@@ -19,6 +20,8 @@ from whoosh.query import Every
 DATA_PATH = "data/comments_relevant.csv"
 INDEX_DIR = "indexdir"
 SEARCH_FIELDS = ["text", "bucket", "family", "category", "video_title", "search_query"]
+SEARCH_LIMIT = 10000
+COMMENTS_PAGE_SIZE = 20
 
 
 ASPECT_PATTERNS = {
@@ -75,6 +78,7 @@ def ensure_types(df: pd.DataFrame) -> pd.DataFrame:
 def build_schema() -> Schema:
     return Schema(
         comment_id=ID(stored=True, unique=True),
+        parent_id=ID(stored=True),
         video_id=ID(stored=True),
         video_url=ID(stored=True),
         bucket=TEXT(stored=True, analyzer=StemmingAnalyzer()),
@@ -119,6 +123,7 @@ def build_index(df: pd.DataFrame, force_rebuild: bool = False):
     for _, row in df.iterrows():
         writer.add_document(
             comment_id=str(row.get("comment_id", "")),
+            parent_id=str(row.get("parent_id", "")),
             video_id=str(row.get("video_id", "")),
             video_url=str(row.get("video_url", "")),
             bucket=str(row.get("bucket", "")),
@@ -144,10 +149,13 @@ def build_index(df: pd.DataFrame, force_rebuild: bool = False):
 def get_index(df: pd.DataFrame, force_rebuild: bool = False):
     if force_rebuild or not index.exists_in(INDEX_DIR):
         return build_index(df, force_rebuild=force_rebuild)
-    return index.open_dir(INDEX_DIR)
+    ix = index.open_dir(INDEX_DIR)
+    if "parent_id" not in ix.schema.names():
+        return build_index(df, force_rebuild=True)
+    return ix
 
 
-def search(ix, query_text: str, limit: int = 300):
+def search(ix, query_text: str, limit: int = SEARCH_LIMIT):
     start = time.perf_counter()
     with ix.searcher() as searcher:
         parser = MultifieldParser(SEARCH_FIELDS, schema=ix.schema, group=OrGroup.factory(0.9))
@@ -160,6 +168,7 @@ def search(ix, query_text: str, limit: int = 300):
                 {
                     "score": float(hit.score),
                     "comment_id": hit.get("comment_id"),
+                    "parent_id": hit.get("parent_id"),
                     "video_id": hit.get("video_id"),
                     "video_url": hit.get("video_url"),
                     "bucket": hit.get("bucket"),
@@ -388,11 +397,21 @@ def init_session_state() -> None:
         "include_replies_filter": True,
         "active_query": "",
         "last_submitted_query": "",
+        "query_mode": "all",
         "query_input": "",
+        "clear_query_input_next_run": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def on_facet_change() -> None:
+    # Facet edits take precedence over previously submitted text query.
+    st.session_state["query_mode"] = "facet"
+    st.session_state["active_query"] = ""
+    st.session_state["last_submitted_query"] = ""
+    st.session_state["clear_query_input_next_run"] = True
 
 
 def sentiment_chart(df: pd.DataFrame):
@@ -412,51 +431,116 @@ def category_chart(df: pd.DataFrame):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def compare_view(df: pd.DataFrame):
+def format_comment_date(value) -> str:
+    if pd.isna(value):
+        return "Unknown date"
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    try:
+        dt = pd.to_datetime(value, errors="coerce")
+        if pd.isna(dt):
+            return "Unknown date"
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return "Unknown date"
+
+
+def sentiment_style(label: str) -> tuple[str, str]:
+    lowered = (label or "").casefold()
+    if lowered == "positive":
+        return "#123826", "#9cf7c6"
+    if lowered == "negative":
+        return "#4a1d24", "#ffb4bf"
+    return "#2d3340", "#d6dbe5"
+
+
+def render_comment_card(row: pd.Series, depth: int = 0):
+    text = html.escape(str(row.get("text", "")))
+    model = html.escape(str(row.get("bucket", "")))
+    published = format_comment_date(row.get("published_at"))
+    likes = int(pd.to_numeric(row.get("like_count", 0), errors="coerce") or 0)
+    weighted = float(pd.to_numeric(row.get("weighted_score", 0.0), errors="coerce") or 0.0)
+    sentiment_raw = str(row.get("suggested_sentiment_label", "neutral"))
+    sentiment = html.escape(sentiment_raw)
+    chip_bg, chip_fg = sentiment_style(sentiment_raw)
+    left = f"{min(depth, 6) * 28}px"
+
+    st.markdown(
+        f"""
+        <div style=\"margin:8px 0 10px {left}; padding:10px 12px; background:#12161e; border:1px solid #2b313d; border-radius:12px;\">
+          <div style=\"display:flex; gap:8px; align-items:center; color:#c7ced9; font-size:12px; margin-bottom:8px;\">
+            <span style=\"font-weight:600; color:#f2f5f9;\">{model}</span>
+            <span>• {published}</span>
+            <span>• score {weighted:.3f}</span>
+            <span>• 👍 {likes}</span>
+            <span style=\"margin-left:auto; padding:2px 8px; border-radius:999px; background:{chip_bg}; color:{chip_fg};\">{sentiment}</span>
+          </div>
+          <div style=\"font-size:14px; line-height:1.45; color:#e8edf3; white-space:pre-wrap;\">{text}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_comments_section(df: pd.DataFrame):
     if df.empty:
-        st.info("No data to compare.")
+        st.warning("No results found. Try broadening query or removing filters.")
         return
 
-    buckets = sorted(df["bucket"].dropna().unique().tolist())
-    if len(buckets) < 2:
-        st.info("Need at least two phone models in current result set for comparison.")
-        return
+    out = df.copy()
+    out["comment_id"] = out.get("comment_id", "").fillna("").astype(str)
+    out["parent_id"] = out.get("parent_id", "").fillna("").astype(str)
+    out["is_reply"] = out.get("is_reply", False).astype(bool)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        phone_a = st.selectbox("Phone A", buckets, index=0)
-    with col2:
-        phone_b = st.selectbox("Phone B", buckets, index=1)
+    top_level = out[out["is_reply"] == False].copy()
+    replies = out[out["is_reply"] == True].copy()
 
-    filtered = df[df["bucket"].isin([phone_a, phone_b])]
+    replies_by_parent: dict[str, pd.DataFrame] = {
+        pid: grp.sort_values(by=["weighted_score", "like_count"], ascending=False)
+        for pid, grp in replies.groupby("parent_id", dropna=False)
+    }
 
-    by_sentiment = (
-        filtered.groupby(["bucket", "suggested_sentiment_label"]).size().reset_index(name="count")
-    )
-    fig_sent = px.bar(
-        by_sentiment,
-        x="suggested_sentiment_label",
-        y="count",
-        color="bucket",
-        barmode="group",
-        title="Phone Comparison by Sentiment",
-    )
-    st.plotly_chart(fig_sent, use_container_width=True)
+    # Paginate parent comments so initial render stays lightweight.
+    top_level_ids = top_level.get("comment_id", pd.Series([], dtype=str)).astype(str).tolist()
+    signature = (len(top_level_ids), tuple(top_level_ids[:50]))
+    if st.session_state.get("comments_signature") != signature:
+        st.session_state["comments_signature"] = signature
+        st.session_state["comments_page"] = 1
 
-    by_aspect = filtered.copy()
-    by_aspect = by_aspect.assign(aspect=by_aspect["aspects"].astype(str).str.split("|"))
-    by_aspect = by_aspect.explode("aspect")
-    by_aspect = by_aspect.groupby(["bucket", "aspect"]).size().reset_index(name="count")
+    total_parents = len(top_level)
+    total_pages = max(1, math.ceil(total_parents / COMMENTS_PAGE_SIZE))
+    current_page = int(st.session_state.get("comments_page", 1))
+    current_page = max(1, min(current_page, total_pages))
+    st.session_state["comments_page"] = current_page
 
-    fig_aspect = px.bar(
-        by_aspect,
-        x="aspect",
-        y="count",
-        color="bucket",
-        barmode="group",
-        title="Phone Comparison by Aspect Mention Frequency",
-    )
-    st.plotly_chart(fig_aspect, use_container_width=True)
+    start_idx = (current_page - 1) * COMMENTS_PAGE_SIZE
+    end_idx = start_idx + COMMENTS_PAGE_SIZE
+    page_parents = top_level.iloc[start_idx:end_idx]
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c1:
+        if st.button("Previous", key="comments_prev", disabled=current_page <= 1):
+            st.session_state["comments_page"] = current_page - 1
+            st.rerun()
+    with c2:
+        shown_start = 0 if total_parents == 0 else start_idx + 1
+        shown_end = min(end_idx, total_parents)
+        st.caption(f"Showing parent comments {shown_start}-{shown_end} of {total_parents} (Page {current_page}/{total_pages})")
+    with c3:
+        if st.button("Next", key="comments_next", disabled=current_page >= total_pages):
+            st.session_state["comments_page"] = current_page + 1
+            st.rerun()
+
+    with st.container(height=680):
+        for _, parent in page_parents.iterrows():
+            with st.container(border=True):
+                render_comment_card(parent, depth=0)
+                pid = str(parent.get("comment_id", ""))
+                direct_replies = replies_by_parent.get(pid)
+                if direct_replies is not None and not direct_replies.empty:
+                    with st.expander(f"Show replies ({len(direct_replies)})", expanded=False):
+                        for _, reply in direct_replies.iterrows():
+                            render_comment_card(reply, depth=1)
 
 
 def main():
@@ -471,6 +555,11 @@ def main():
     raw_df = pd.read_csv(DATA_PATH)
     df = ensure_types(raw_df)
     init_session_state()
+
+    # Clear query input only before the widget is instantiated.
+    if st.session_state.get("clear_query_input_next_run", False):
+        st.session_state["query_input"] = ""
+        st.session_state["clear_query_input_next_run"] = False
 
     with st.sidebar:
         st.header("Index Controls")
@@ -489,6 +578,7 @@ def main():
             reset_filters()
         st.session_state["active_query"] = new_query
         st.session_state["last_submitted_query"] = new_query
+        st.session_state["query_mode"] = "text"
 
     query_text = st.session_state.get("active_query", "")
 
@@ -500,6 +590,7 @@ def main():
         st.header("Facets")
         if st.button("Reset Filters"):
             reset_filters()
+            st.session_state["query_mode"] = "all"
 
         family_options = ["All"] + sorted(df["family"].dropna().astype(str).unique().tolist())
         category_options = ["All"] + sorted(df["category"].dropna().astype(str).unique().tolist())
@@ -510,7 +601,7 @@ def main():
         aspect_values = sorted({a for v in df["aspects"].astype(str).tolist() for a in v.split("|")})
         aspect_options = ["All"] + aspect_values
 
-        selected_family = st.selectbox("Brand", family_options, key="family_filter")
+        selected_family = st.selectbox("Brand", family_options, key="family_filter", on_change=on_facet_change)
 
         if selected_family == "All":
             available_buckets = sorted(df["bucket"].dropna().astype(str).unique().tolist())
@@ -522,7 +613,7 @@ def main():
         if st.session_state.get("bucket_filter") not in bucket_options:
             st.session_state["bucket_filter"] = "All"
 
-        selected_bucket = st.selectbox("Phone Model", bucket_options, key="bucket_filter")
+        selected_bucket = st.selectbox("Phone Model", bucket_options, key="bucket_filter", on_change=on_facet_change)
 
         # If a model is selected, auto-align brand for filtering consistency.
         effective_family = selected_family
@@ -532,34 +623,37 @@ def main():
                 effective_family = mapped_family
                 st.caption(f"Brand auto-aligned to {mapped_family} for model {selected_bucket}.")
 
-        selected_category = st.selectbox("Category", category_options, key="category_filter")
-        show_advanced = st.checkbox("Show Advanced Facets", value=False)
+        selected_category = st.selectbox("Category", category_options, key="category_filter", on_change=on_facet_change)
+        show_advanced = st.checkbox("Show Advanced Facets", value=False, on_change=on_facet_change)
 
         if show_advanced:
-            selected_sentiment = st.selectbox("Sentiment", sentiment_options, key="sentiment_filter")
-            selected_aspect = st.selectbox("Aspect", aspect_options, key="aspect_filter")
+            selected_sentiment = st.selectbox("Sentiment", sentiment_options, key="sentiment_filter", on_change=on_facet_change)
+            selected_aspect = st.selectbox("Aspect", aspect_options, key="aspect_filter", on_change=on_facet_change)
         else:
             selected_sentiment = "All"
             selected_aspect = "All"
 
-        include_replies = st.checkbox("Include Replies", key="include_replies_filter")
-        max_results = st.slider("Max Results", 50, 5000, 1000, 50)
+        include_replies = st.checkbox("Include Replies", key="include_replies_filter", on_change=on_facet_change)
         auto_model_lock = st.checkbox("Auto-lock detected model from query", value=True)
 
         if ambiguous_buckets:
             st.caption("Warning: some models map to multiple brands in data. Check source rows for consistency.")
 
-    inferred_bucket = infer_bucket_from_query(query_text, all_buckets) if auto_model_lock else None
-    inferred_family = infer_family_from_query(query_text, all_families)
-    inferred_category = infer_category_from_query(query_text)
+    query_mode = st.session_state.get("query_mode", "all")
+    effective_query_text = query_text if query_mode == "text" else ""
+
+    inferred_bucket = infer_bucket_from_query(effective_query_text, all_buckets) if auto_model_lock else None
+    inferred_family = infer_family_from_query(effective_query_text, all_families)
+    inferred_category = infer_category_from_query(effective_query_text)
+
+    query_start = time.perf_counter()
 
     # Queryless browsing should still work: use full dataset baseline when query is empty.
-    if query_text.strip():
-        search_df, latency_ms = search(ix, query_text, limit=max_results)
+    if effective_query_text.strip():
+        search_df, _search_latency_ms = search(ix, effective_query_text, limit=SEARCH_LIMIT)
     else:
         search_df = df.copy()
         search_df["score"] = 0.0
-        latency_ms = 0.0
 
     effective_bucket = selected_bucket
     if inferred_bucket is not None:
@@ -591,41 +685,36 @@ def main():
         selected_sentiment,
         selected_aspect,
         include_replies,
-        query_text,
+        effective_query_text,
     )
+
+    latency_ms = (time.perf_counter() - query_start) * 1000.0
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Result Count", int(len(result_df)))
     m2.metric("Latency (ms)", f"{latency_ms:.2f}")
-    m3.metric("Query", query_text if query_text.strip() else "<all>")
+    if effective_query_text.strip():
+        query_label = effective_query_text
+    else:
+        facet_parts: list[str] = []
+        if selected_family != "All":
+            facet_parts.append(f"brand={selected_family}")
+        if selected_bucket != "All":
+            facet_parts.append(f"model={selected_bucket}")
+        if selected_category != "All":
+            facet_parts.append(f"category={selected_category}")
+        query_label = " | ".join(facet_parts) if facet_parts else "<all>"
+    m3.metric("Query", query_label)
 
-    tab_results, tab_summary, tab_compare = st.tabs(["Ranked Results", "Summary", "Compare"])
-
-    with tab_results:
-        if result_df.empty:
-            st.warning("No results found. Try broadening query or removing filters.")
-        else:
-            display_cols = [
-                "weighted_score",
-                "score",
-                "bucket",
-                "family",
-                "category",
-                "aspects",
-                "suggested_sentiment_label",
-                "like_count",
-                "video_title",
-                "text",
-                "video_url",
-            ]
-            st.dataframe(result_df[display_cols], use_container_width=True, height=540)
+    # Summary is the first tab so it is the default visible section.
+    tab_summary, tab_results = st.tabs(["Summary", "Ranked Results"])
 
     with tab_summary:
         sentiment_chart(result_df)
         category_chart(result_df)
 
-    with tab_compare:
-        compare_view(result_df)
+    with tab_results:
+        render_comments_section(result_df)
 
 
 if __name__ == "__main__":
