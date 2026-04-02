@@ -4,6 +4,40 @@ Run ```pip install -r requirements.txt``` to install the required dependencies.
 
 Upload model files inside a folder named 'local_finetuned'. Get model files from [this link](https://entuedu-my.sharepoint.com/:f:/g/personal/ivansoji001_e_ntu_edu_sg/IgBRNMXQh2p7SJA0r7E8H3lxASxSlVDXRx2o7QFDxR6kn7M?e=9IDqX1).
 
+## Overview
+
+1. Sentence Segmentation: Long reviews are first split into smaller segments (sentences or clauses) to better capture localized sentiment.
+2. Per-Segment Classification:
+
+Each segment is classified independently using a weighted ensemble:
+- `Local Fine-Tuned Model` → weight = 3  
+- `SenticNet` → weight = 2  
+- `Rule-Based Model` → weight = 1
+
+Each model predicts positive or negative, and votes are aggregated into:
+vote_scores = { positive: X, negative: Y }
+
+3. Positional Weighting: Later segments are given higher importance, based on the observation that users often express their final opinion at the end of a review.
+This is implemented using a positional weighting scheme where:
+- Early segments → lower weight  
+- Final segments → higher weight  
+
+4. Document-Level Aggregation: Segment-level vote scores are combined into a final document-level score:
+```
+final_vote_scores = weighted sum of all segment votes
+```
+Final label is assigned as:
+```
+positive if positive_score ≥ negative_score
+negative otherwise
+```
+
+5. Final-Sentence Override: If the final segment expresses strong sentiment and the overall decision is uncertain, it overrides the aggregated result.
+
+This handles cases where:
+- Earlier text is mixed or neutral  
+- Final sentence contains the true opinion  
+
 ## Usage
 
 ```python
