@@ -5,3 +5,5 @@ tqdm
 whoosh
 streamlit
 plotly
+wordcloud
+matplotlib
