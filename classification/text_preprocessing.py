@@ -146,7 +146,7 @@ PHONE_PATTERN = re.compile(r"^(?:iphone|pixel|xiaomi)_|^galaxy_s\d+")
 MENTION_PATTERN = re.compile(r"@[A-Za-z0-9_.]+")
 URL_PATTERN = re.compile(r"http\S+|www\S+")
 COMMA_IN_NUMBER = re.compile(r"(?<=\d),(?=\d)")
-DECIMAL_MARKER = "__DECIMAL__"
+DECIMAL_MARKER = "zxqvdecimalzxqv"
 DECIMAL_PATTERN = re.compile(r"(?<=\d)\.(?=\d)")
 MULTI_EXCLAIM = re.compile(r"!{2,}")
 MULTI_QUESTION = re.compile(r"\?{2,}")
