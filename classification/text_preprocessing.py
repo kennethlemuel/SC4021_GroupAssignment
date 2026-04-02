@@ -152,7 +152,6 @@ MULTI_EXCLAIM = re.compile(r"!{2,}")
 MULTI_QUESTION = re.compile(r"\?{2,}")
 MULTI_SPACE = re.compile(r"\s+")
 IPHONE_PATTERN = re.compile(r"\biphone\s*(\d+)(?:\s*(pro\s*max|pro|plus))?\b", re.IGNORECASE)
-IPHONE_SHORT_PATTERN = re.compile(r"\b(\d+)(?:\s*(pro\s*max|pro|plus))\b", re.IGNORECASE)
 SAMSUNG_PATTERN = re.compile(r"\b(?:samsung\s*galaxy\s*|galaxy\s*)?s\s*(\d+)(?:\s*(ultra|plus|\+))?\b", re.IGNORECASE)
 PIXEL_PATTERN = re.compile(r"\b(?:google\s*)?pixel\s*(\d+)(?:\s*(pro))?\b", re.IGNORECASE)
 XIAOMI_PATTERN = re.compile(r"\bxiaomi\s*(\d+)(?:\s*(ultra))?\b", re.IGNORECASE)
@@ -264,7 +263,6 @@ class TextPreprocessor:
             return f"xiaomi_{number}"
         
         text = IPHONE_PATTERN.sub(replace_iphone, text)
-        text = IPHONE_SHORT_PATTERN.sub(replace_iphone, text)
         text = SAMSUNG_PATTERN.sub(replace_samsung, text)
         text = PIXEL_PATTERN.sub(replace_pixel, text)
         text = XIAOMI_PATTERN.sub(replace_xiaomi, text)
@@ -391,7 +389,7 @@ class TextPreprocessor:
         df = df.copy()
         logger.info("Cleaning text...") 
         df[output_cleaned] = df[text_column].progress_apply(self.clean_text) # clean text
-        logger.info("Tokenizing...")
+        logger.info("Tokenising...")
         df[output_cleaned + "_tokens"] = df[output_cleaned].progress_apply(self.tokenise) # tokenise
         logger.info("POS tagging...")
         df[output_processed] = df[output_cleaned + "_tokens"].progress_apply(self.pos_tag_tokens) # POS tagging
