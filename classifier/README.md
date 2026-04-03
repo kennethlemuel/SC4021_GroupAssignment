@@ -6,37 +6,15 @@ Upload model files inside a folder named 'local_finetuned'. Get model files from
 
 ## Overview
 
-1. Sentence Segmentation: Long reviews are first split into smaller segments (sentences or clauses) to better capture localized sentiment.
-2. Per-Segment Classification:
+1. Input Processing: A single review or text string is passed into ```predict_single(text)```. The text is classified as a whole document. There is no sentence splitting or clause segmentation.
+2. Model Prediction: Used RoBERTa-base transformer model fine-tuned on the Amazon Reviews dataset. The model is trained to classify reviews into two classes: positive and negative. The model outputs a predicted label for the input text.
+3. SenticNet Prediction: SenticNet is a knowledge base that provides sentiment information for concepts. The model also uses SenticNet to extract sentiment information from the input text, which can help improve the accuracy of the classification. Computes average polarity score.
+4. Weighted Voting: Each model contributes a vote:
+- local_finetuned → weight = 4
+- senticnet → weight = 1
+- Only positive and negative predictions are counted.
+5. Final Label: Determined by the weighted majority vote.
 
-Each segment is classified independently using a weighted ensemble:
-- `Local Fine-Tuned Model` → weight = 3  
-- `SenticNet` → weight = 2  
-- `Rule-Based Model` → weight = 1
-
-Each model predicts positive or negative, and votes are aggregated into:
-vote_scores = { positive: X, negative: Y }
-
-3. Positional Weighting: Later segments are given higher importance, based on the observation that users often express their final opinion at the end of a review.
-This is implemented using a positional weighting scheme where:
-- Early segments → lower weight  
-- Final segments → higher weight  
-
-4. Document-Level Aggregation: Segment-level vote scores are combined into a final document-level score:
-```
-final_vote_scores = weighted sum of all segment votes
-```
-Final label is assigned as:
-```
-positive if positive_score ≥ negative_score
-negative otherwise
-```
-
-5. Final-Sentence Override: If the final segment expresses strong sentiment and the overall decision is uncertain, it overrides the aggregated result.
-
-This handles cases where:
-- Earlier text is mixed or neutral  
-- Final sentence contains the true opinion  
 
 ## Usage
 
