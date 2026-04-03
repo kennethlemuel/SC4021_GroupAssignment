@@ -1,9 +1,9 @@
-bucket,total_comments,high_relevance,medium_relevance,low_relevance,sentiment_ready,avg_score,sentiment_ready_pct
-Galaxy S26,3121,725,934,1462,1481,3.42,47.5
-Galaxy S26 Ultra,9216,1505,2928,4783,3789,2.7,41.1
-Pixel 10,2287,629,719,939,1154,3.77,50.5
-Pixel 10 Pro,2267,470,711,1086,1022,2.93,45.1
-Xiaomi 15,1528,277,412,839,625,2.95,40.9
-Xiaomi 15 Ultra,2371,335,727,1309,901,2.26,38.0
-iPhone 17,2691,304,781,1606,933,1.96,34.7
-iPhone 17 Pro,2386,247,764,1375,751,1.94,31.5
+bucket,total_comments,english_comments,high_relevance,medium_relevance,low_relevance,sentiment_ready,avg_score,avg_words,sentiment_ready_pct
+Galaxy S26,3121,2854,533,559,2029,1092,0.83,23.7,35.0
+Galaxy S26 Ultra,9216,8103,1055,1688,6473,2743,-0.41,22.2,29.8
+Pixel 10,2287,2053,483,437,1367,920,1.26,29.1,40.2
+Pixel 10 Pro,2267,1852,335,420,1512,755,-0.4,26.2,33.3
+Xiaomi 15,1528,1391,217,240,1071,457,-0.04,19.6,29.9
+Xiaomi 15 Ultra,2371,1879,220,422,1729,642,-1.5,19.0,27.1
+iPhone 17,2691,2271,210,438,2043,648,-1.96,16.2,24.1
+iPhone 17 Pro,2386,2060,155,384,1847,539,-1.74,17.3,22.6

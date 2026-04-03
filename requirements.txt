@@ -8,3 +8,8 @@ logging
 pathlib
 typing
 dataclasses
+whoosh
+streamlit
+plotly
+wordcloud
+matplotlib
