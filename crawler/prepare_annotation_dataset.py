@@ -404,6 +404,9 @@ COMMENT_CATEGORY_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+COMMENT_CATEGORY_ORDER: tuple[str, ...] = tuple(category for category, _ in COMMENT_CATEGORY_PATTERNS) + ("overall",)
+ANNOTATION_CATEGORY_MINIMUMS: dict[str, int] = {"storage": 20}
+
 DEFAULT_MIN_COMMENT_WORDS = 4
 DEFAULT_MAX_COMMENT_WORDS = 120
 
@@ -718,6 +721,169 @@ def build_outputs(
     return scored_df, relevant_df, annotation_df, summary_df
 
 
+def _allocate_category_quotas(counts: pd.Series, limit: int) -> dict[str, int]:
+    present_categories = [category for category in COMMENT_CATEGORY_ORDER if int(counts.get(category, 0)) > 0]
+    if not present_categories or limit <= 0:
+        return {}
+
+    quotas = {category: 1 for category in present_categories[:limit]}
+    if len(quotas) == limit:
+        return quotas
+
+    remaining = limit - sum(quotas.values())
+    available_extra = {
+        category: int(counts[category]) - quotas.get(category, 0)
+        for category in present_categories
+        if int(counts[category]) - quotas.get(category, 0) > 0
+    }
+
+    while remaining > 0 and available_extra:
+        total_extra = sum(available_extra.values())
+        if total_extra <= 0:
+            break
+
+        raw_shares = {category: remaining * extra / total_extra for category, extra in available_extra.items()}
+        additions = {
+            category: min(int(raw_shares[category]), available_extra[category]) for category in available_extra
+        }
+        assigned = sum(additions.values())
+
+        if assigned == 0:
+            remainders = sorted(
+                available_extra,
+                key=lambda category: (-raw_shares[category], COMMENT_CATEGORY_ORDER.index(category)),
+            )
+            for category in remainders:
+                if remaining == 0:
+                    break
+                if available_extra[category] <= 0:
+                    continue
+                additions[category] = additions.get(category, 0) + 1
+                assigned += 1
+                remaining -= 1
+                available_extra[category] -= 1
+            for category, extra in list(available_extra.items()):
+                if extra <= 0:
+                    available_extra.pop(category)
+            for category, add in additions.items():
+                if add > 0:
+                    quotas[category] = quotas.get(category, 0) + add
+            continue
+
+        for category, add in additions.items():
+            if add > 0:
+                quotas[category] = quotas.get(category, 0) + add
+                available_extra[category] -= add
+        remaining -= assigned
+        available_extra = {category: extra for category, extra in available_extra.items() if extra > 0}
+
+    return quotas
+
+
+def build_annotation_export(annotation_df: pd.DataFrame, limit_per_bucket: int | None) -> pd.DataFrame:
+    if limit_per_bucket is None:
+        return annotation_df.reset_index(drop=True)
+
+    selected_frames: list[pd.DataFrame] = []
+    for bucket, bucket_df in annotation_df.groupby("bucket", sort=True):
+        bucket_df = bucket_df.copy()
+        category_counts = bucket_df["comment_category"].value_counts()
+        quotas = _allocate_category_quotas(category_counts, limit_per_bucket)
+
+        bucket_selection = []
+        for category in COMMENT_CATEGORY_ORDER:
+            quota = quotas.get(category, 0)
+            if quota <= 0:
+                continue
+            category_slice = bucket_df[bucket_df["comment_category"] == category].head(quota)
+            if not category_slice.empty:
+                bucket_selection.append(category_slice)
+
+        selected_bucket_df = pd.concat(bucket_selection, ignore_index=False) if bucket_selection else bucket_df.head(0)
+        if len(selected_bucket_df) < min(limit_per_bucket, len(bucket_df)):
+            selected_ids = set(selected_bucket_df["comment_id"])
+            top_up = bucket_df[~bucket_df["comment_id"].isin(selected_ids)].head(limit_per_bucket - len(selected_bucket_df))
+            selected_bucket_df = pd.concat([selected_bucket_df, top_up], ignore_index=False)
+
+        selected_frames.append(selected_bucket_df.head(limit_per_bucket))
+
+    annotation_export = pd.concat(selected_frames, ignore_index=True)
+    return enforce_annotation_category_minimums(annotation_df, annotation_export)
+
+
+def enforce_annotation_category_minimums(
+    annotation_df: pd.DataFrame,
+    annotation_export: pd.DataFrame,
+) -> pd.DataFrame:
+    export_df = annotation_export.copy()
+
+    for category, minimum in ANNOTATION_CATEGORY_MINIMUMS.items():
+        current_count = int((export_df["comment_category"] == category).sum())
+        if current_count >= minimum:
+            continue
+
+        needed = minimum - current_count
+        while needed > 0:
+            progress_made = False
+            bucket_order = []
+            for bucket, bucket_df in annotation_df.groupby("bucket", sort=True):
+                total_available = int((bucket_df["comment_category"] == category).sum())
+                selected_count = int(
+                    ((export_df["bucket"] == bucket) & (export_df["comment_category"] == category)).sum()
+                )
+                surplus = total_available - selected_count
+                if surplus > 0:
+                    bucket_order.append((bucket, surplus))
+
+            bucket_order.sort(key=lambda item: (-item[1], item[0]))
+
+            for bucket, _ in bucket_order:
+                selected_bucket_df = export_df[export_df["bucket"] == bucket]
+                candidate_pool = annotation_df[
+                    (annotation_df["bucket"] == bucket)
+                    & (annotation_df["comment_category"] == category)
+                    & (~annotation_df["comment_id"].isin(export_df["comment_id"]))
+                ]
+                if candidate_pool.empty:
+                    continue
+
+                removable_candidates = selected_bucket_df[selected_bucket_df["comment_category"] != category].copy()
+                if removable_candidates.empty:
+                    continue
+
+                removable_candidates["_remove_priority"] = removable_candidates["comment_category"].apply(
+                    lambda value: COMMENT_CATEGORY_ORDER.index(value)
+                    if value in COMMENT_CATEGORY_ORDER
+                    else len(COMMENT_CATEGORY_ORDER)
+                )
+                removable_candidates.sort_values(
+                    by=["_remove_priority", "relevance_score", "like_count", "text_length_words"],
+                    ascending=[False, True, True, False],
+                    inplace=True,
+                )
+
+                row_to_remove = removable_candidates.iloc[0]
+                row_to_add = candidate_pool.iloc[0]
+
+                export_df = export_df[export_df["comment_id"] != row_to_remove["comment_id"]]
+                export_df = pd.concat([export_df, row_to_add.to_frame().T], ignore_index=True)
+                needed -= 1
+                progress_made = True
+
+                if needed == 0:
+                    break
+
+            if not progress_made:
+                break
+
+    export_df.sort_values(
+        by=["bucket", "comment_category", "relevance_score", "like_count", "text_length_words"],
+        ascending=[True, True, False, False, True],
+        inplace=True,
+    )
+    return export_df.reset_index(drop=True)
+
+
 def save_outputs(
     scored_df: pd.DataFrame,
     relevant_df: pd.DataFrame,
@@ -729,11 +895,7 @@ def save_outputs(
     relevant_df.to_csv(COMMENTS_RELEVANT_PATH, index=False)
     summary_df.to_csv(RELEVANCE_SUMMARY_PATH, index=False)
 
-    if limit_per_bucket is not None:
-        annotation_export = annotation_df.groupby("bucket", group_keys=False).head(limit_per_bucket).reset_index(drop=True)
-    else:
-        annotation_export = annotation_df.reset_index(drop=True)
-
+    annotation_export = build_annotation_export(annotation_df, limit_per_bucket)
     annotation_export.to_csv(ANNOTATION_TEMPLATE_PATH, index=False)
 
 
