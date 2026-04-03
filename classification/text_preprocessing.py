@@ -431,7 +431,7 @@ def main():
     preprocessor = TextPreprocessor(config) # set up preprocesser
     
     logger.info(f"Loading data from {UNPROCESSED_CANDIDATES}...")
-    df = pd.read_csv(UNPROCESSED_CANDIDATES, usecols=["text"])
+    df = pd.read_csv(UNPROCESSED_CANDIDATES, usecols=["text", "comment_category"])
     
     # sample of dataset for testing
     if config.sample_size:
@@ -439,6 +439,7 @@ def main():
         df = df.head(config.sample_size)
     
     df_processed = preprocessor.process_dataframe(df) # processed df
+
     
     # process vocab stats 
     vocab_stats = get_vocabulary_stats(df_processed, "processed_comments")
