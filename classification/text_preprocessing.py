@@ -60,8 +60,8 @@ REQUIRED_NLTK_RESOURCES = [
     ("tokenizers/punkt", "punkt"),
     ("tokenizers/punkt_tab", "punkt_tab"),
     ("corpora/stopwords", "stopwords"),
-    ("corpora/wordnet", "wordnet"),
-    ("corpora/omw-1.4", "omw-1.4"),
+    ("corpora/wordnet.zip", "wordnet.zip"),
+    ("corpora/omw-1.4.zip", "omw-1.4.zip"),
     ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
     ("taggers/universal_tagset", "universal_tagset"),
 ]
@@ -126,7 +126,6 @@ SLANG_DICT = [
 SLANG_PATTERNS = [(re.compile(rf"\b{re.escape(pattern)}\b", re.IGNORECASE), replacement) for pattern, replacement in SLANG_DICT]
 
 # stopword config
-BASE_STOPWORDS = set(stopwords.words('english'))
 RM_EXTRAS = {"'s", "s", "'m", "'re", "'ve", "'ll", "'d"}
 
 def build_stopwords(exclude):
@@ -134,7 +133,8 @@ def build_stopwords(exclude):
     function to build set of stopwords with exclusions
     '''
     exclude = exclude or []
-    stopwords_set = BASE_STOPWORDS - set(exclude)
+    base_stopwords = set(stopwords.words("english"))
+    stopwords_set = base_stopwords - set(exclude)
     stopwords_set.update(RM_EXTRAS)
     return stopwords_set
 
