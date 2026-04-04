@@ -26,7 +26,7 @@ except Exception:
 
 DATA_PATH = "data/comments_relevant.csv"
 INDEX_DIR = "indexdir"
-SEARCH_FIELDS = ["text", "bucket", "family", "category", "video_title", "search_query"]
+SEARCH_FIELDS = ["text", "bucket", "family", "comment_category", "video_title", "search_query"]
 SEARCH_LIMIT = 10000
 COMMENTS_PAGE_SIZE = 20
 RESULTS_PAGE_SIZE = 10
@@ -93,7 +93,7 @@ def build_schema() -> Schema:
         bucket=TEXT(stored=True, analyzer=StemmingAnalyzer()),
         family=TEXT(stored=True, analyzer=StemmingAnalyzer()),
         variant=ID(stored=True),
-        category=ID(stored=True),
+        comment_category=ID(stored=True),
         video_title=TEXT(stored=True, analyzer=StemmingAnalyzer()),
         channel_title=TEXT(stored=True, analyzer=StemmingAnalyzer()),
         search_query=TEXT(stored=True, analyzer=StemmingAnalyzer()),
@@ -138,7 +138,7 @@ def build_index(df: pd.DataFrame, force_rebuild: bool = False):
             bucket=str(row.get("bucket", "")),
             family=str(row.get("family", "")),
             variant=str(row.get("variant", "")),
-            category=str(row.get("category", "")),
+            comment_category=str(row.get("comment_category", "")),
             video_title=str(row.get("video_title", "")),
             channel_title=str(row.get("channel_title", "")),
             search_query=str(row.get("search_query", "")),
@@ -182,7 +182,7 @@ def search(
 
         query_parts = [base_query]
         if category != "All":
-            query_parts.append(Term("category", str(category)))
+            query_parts.append(Term("comment_category", str(category)))
         if sentiment != "All":
             query_parts.append(Term("suggested_sentiment_label", str(sentiment)))
         if not include_replies:
@@ -213,7 +213,7 @@ def search(
                     "bucket": hit.get("bucket"),
                     "family": hit.get("family"),
                     "variant": hit.get("variant"),
-                    "category": hit.get("category"),
+                    "comment_category": hit.get("comment_category"),
                     "video_title": hit.get("video_title"),
                     "channel_title": hit.get("channel_title"),
                     "search_query": hit.get("search_query"),
@@ -294,7 +294,7 @@ def apply_filters(
     if bucket != "All":
         mask &= df["bucket"].eq(bucket)
     if category != "All":
-        mask &= df["category"].eq(category)
+        mask &= df["comment_category"].eq(category)
     if sentiment != "All":
         mask &= df["suggested_sentiment_label"].eq(sentiment)
     if aspect != "All":
