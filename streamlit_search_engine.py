@@ -535,14 +535,14 @@ def sentiment_chart(df: pd.DataFrame):
 def category_chart(df: pd.DataFrame):
     if df.empty:
         return
-    chart_df = df.groupby("category").size().reset_index(name="count").sort_values("count", ascending=False)
+    chart_df = df.groupby("comment_category").size().reset_index(name="count").sort_values("count", ascending=False)
     category_palette = ["#4c78a8", "#f58518", "#7a5195", "#2f4b7c", "#bc5090", "#ffa600", "#3b8ea5"]
     fig = px.bar(
         chart_df,
-        x="category",
+        x="comment_category",
         y="count",
         title="Category Distribution",
-        color="category",
+        color="comment_category",
         color_discrete_sequence=category_palette,
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -1029,7 +1029,7 @@ def main():
             st.session_state["query_mode"] = "all"
 
         family_options = ["All"] + sorted(df["family"].dropna().astype(str).unique().tolist())
-        category_options = ["All"] + sorted(df["category"].dropna().astype(str).unique().tolist())
+        category_options = ["All"] + sorted(df["comment_category"].dropna().astype(str).unique().tolist())
 
         selected_family = st.selectbox("Brand", family_options, key="family_filter", on_change=on_facet_change)
 
