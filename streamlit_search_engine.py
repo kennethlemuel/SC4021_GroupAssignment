@@ -338,39 +338,32 @@ def get_brand_model_mappings(df: pd.DataFrame) -> tuple[dict[str, str], dict[str
 
 
 def bucket_pattern(bucket: str, all_buckets: list[str]) -> re.Pattern[str]:
-    lowered = bucket.casefold()
-    escaped = re.escape(lowered).replace("\\ ", r"\s+")
+    lowered = (bucket or "").casefold()
+    parts = re.findall(r"[a-z0-9]+", lowered)
+    if not parts:
+        return re.compile(r"a^", flags=re.IGNORECASE)
 
-    # For base models that are substrings of premium variants, exclude common premium suffixes.
-    is_prefix_of_other = any(
+    # Match model tokens with flexible separators, e.g. "iphone17pro" / "iphone 17 pro" / "iphone-17-pro".
+    token_expr = r"\W*".join(re.escape(p) for p in parts)
+    premium_suffixes = r"(pro|max|plus|ultra|mini|fold|flip|edge|fe)"
+
+    # If this bucket is a base prefix of another model, block premium suffix continuation.
+    is_base_prefix = any(
         other.casefold().startswith(lowered + " ") for other in all_buckets if other != bucket
     )
-    if is_prefix_of_other:
+    if is_base_prefix:
         return re.compile(
-            rf"\b{escaped}\b(?!\s+(pro|max|plus|ultra|mini|fold|flip|edge))",
+            rf"\b{token_expr}\b(?!\W*{premium_suffixes}\b)",
             flags=re.IGNORECASE,
         )
 
-    return re.compile(rf"\b{escaped}\b", flags=re.IGNORECASE)
+    return re.compile(rf"\b{token_expr}\b", flags=re.IGNORECASE)
 
 
 def infer_bucket_from_query(query_text: str, all_buckets: list[str]) -> str | None:
     q = (query_text or "").strip().casefold()
     if not q:
         return None
-
-    premium_tokens = (
-        "pro",
-        "max",
-        "plus",
-        "ultra",
-        "mini",
-        "fold",
-        "flip",
-        "edge",
-        "fe",
-    )
-    has_premium_intent = any(re.search(rf"\b{re.escape(token)}\b", q) for token in premium_tokens)
 
     # Prefer longer bucket names first (e.g., iPhone 17 Pro over iPhone 17).
     ordered = sorted(all_buckets, key=lambda x: len(x), reverse=True)
@@ -380,12 +373,9 @@ def infer_bucket_from_query(query_text: str, all_buckets: list[str]) -> str | No
         if pattern.search(q):
             matches.append(bucket)
 
-    # If the query clearly asks for a premium variant, lock to the most specific match.
-    # This prevents "iphone 17 pro" from falling back to base models like "iphone 17".
-    if has_premium_intent and matches:
+    # Strict model inference: if we detect a model phrase, lock query to the most specific match.
+    if matches:
         return matches[0]
-
-    # For base-model intent (e.g., "iphone 17"), keep it broad so related variants can appear.
     return None
 
 
@@ -451,7 +441,6 @@ def reset_filters() -> None:
     st.session_state["category_filter"] = "All"
     st.session_state["sentiment_filter"] = "All"
     st.session_state["aspect_filter"] = "All"
-    st.session_state["include_replies_filter"] = True
     st.session_state["enable_date_filter"] = False
 
 
@@ -462,7 +451,6 @@ def init_session_state() -> None:
         "category_filter": "All",
         "sentiment_filter": "All",
         "aspect_filter": "All",
-        "include_replies_filter": True,
         "enable_date_filter": False,
         "start_date_filter": None,
         "end_date_filter": None,
@@ -489,8 +477,25 @@ def sentiment_chart(df: pd.DataFrame):
     if df.empty:
         st.info("No result rows for sentiment summary.")
         return
-    chart_df = df.groupby("suggested_sentiment_label").size().reset_index(name="count")
-    fig = px.pie(chart_df, names="suggested_sentiment_label", values="count", title="Sentiment Distribution")
+    chart_df = (
+        df.assign(suggested_sentiment_label=df["suggested_sentiment_label"].astype(str).str.lower())
+        .groupby("suggested_sentiment_label")
+        .size()
+        .reset_index(name="count")
+    )
+    sentiment_palette = {
+        "positive": "#5f9f7a",
+        "neutral": "#8b93a2",
+        "negative": "#b66a72",
+    }
+    fig = px.pie(
+        chart_df,
+        names="suggested_sentiment_label",
+        values="count",
+        title="Sentiment Distribution",
+        color="suggested_sentiment_label",
+        color_discrete_map=sentiment_palette,
+    )
     panel_height_px = 420
     fig.update_layout(height=panel_height_px)
 
@@ -500,16 +505,16 @@ def sentiment_chart(df: pd.DataFrame):
     dominant = max(ordered_labels, key=lambda label: counts.get(label, 0))
 
     indicator_style = {
-        "positive": {"accent": "#22c55e", "badge_bg": "#123b2a", "icon": "↗"},
-        "neutral": {"accent": "#eab308", "badge_bg": "#4b3b0d", "icon": "→"},
-        "negative": {"accent": "#ef4444", "badge_bg": "#4d1d23", "icon": "↘"},
+        "positive": {"accent": "#5f9f7a", "badge_bg": "#1a3427", "icon": "↗"},
+        "neutral": {"accent": "#8b93a2", "badge_bg": "#2b313d", "icon": "→"},
+        "negative": {"accent": "#b66a72", "badge_bg": "#40242a", "icon": "↘"},
     }
     style = indicator_style[dominant]
     dominant_pct = (counts.get(dominant, 0) / total * 100.0) if total else 0.0
 
     left_col, right_col = st.columns([3, 2])
     with left_col:
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     with right_col:
         st.markdown(
@@ -531,8 +536,16 @@ def category_chart(df: pd.DataFrame):
     if df.empty:
         return
     chart_df = df.groupby("category").size().reset_index(name="count").sort_values("count", ascending=False)
-    fig = px.bar(chart_df, x="category", y="count", title="Category Distribution")
-    st.plotly_chart(fig, width="stretch")
+    category_palette = ["#4c78a8", "#f58518", "#7a5195", "#2f4b7c", "#bc5090", "#ffa600", "#3b8ea5"]
+    fig = px.bar(
+        chart_df,
+        x="category",
+        y="count",
+        title="Category Distribution",
+        color="category",
+        color_discrete_sequence=category_palette,
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def word_cloud_chart(df: pd.DataFrame):
@@ -549,15 +562,16 @@ def word_cloud_chart(df: pd.DataFrame):
     wc = WordCloud(
         width=1200,
         height=420,
-        background_color="white",
+        background_color="#12161e",
         max_words=100,
         colormap="viridis",
     ).generate(all_text)
 
-    fig_wc, ax_wc = plt.subplots(figsize=(12, 4.2))
+    fig_wc, ax_wc = plt.subplots(figsize=(12, 4.2), facecolor="#12161e")
+    ax_wc.set_facecolor("#12161e")
     ax_wc.imshow(wc, interpolation="bilinear")
     ax_wc.axis("off")
-    ax_wc.set_title("Word Cloud of Search Results")
+    ax_wc.set_title("Word Cloud of Search Results", color="#e8edf3")
     st.pyplot(fig_wc)
     plt.close(fig_wc)
 
@@ -583,7 +597,7 @@ def results_over_time_chart(df: pd.DataFrame):
         labels={"date": "Date", "count": "Number of Comments"},
     )
     fig_timeline.update_layout(height=320)
-    st.plotly_chart(fig_timeline, width="stretch")
+    st.plotly_chart(fig_timeline, use_container_width=True)
 
 
 def sentiment_counts(df: pd.DataFrame) -> dict[str, int]:
@@ -685,7 +699,7 @@ def render_sentiment_comparison(
         barmode="group",
         title="Sentiment Comparison",
     )
-    st.plotly_chart(fig_compare, width="stretch")
+    st.plotly_chart(fig_compare, use_container_width=True)
 
     q1_pos = (q1_counts["positive"] / q1_total * 100.0) if q1_total else 0.0
     q2_pos = (q2_counts["positive"] / q2_total * 100.0) if q2_total else 0.0
@@ -791,42 +805,81 @@ def render_comment_card(row: pd.Series, rank: int):
 
 def render_results_pagination(total_pages: int, current_page: int, page_state_key: str, widget_scope: str) -> int:
     if total_pages <= 1:
-        st.caption("Page 1 of 1")
+        st.markdown(
+            "<div style='text-align:center; color:#9ca8ba; font-size:12px; margin:6px 0;'>Page 1 of 1</div>",
+            unsafe_allow_html=True,
+        )
         return current_page
 
-    max_buttons = 7
-    half = max_buttons // 2
+    max_visible = 7
+    half = max_visible // 2
     start_page = max(1, current_page - half)
-    end_page = min(total_pages, start_page + max_buttons - 1)
-    if end_page - start_page + 1 < max_buttons:
-        start_page = max(1, end_page - max_buttons + 1)
+    end_page = min(total_pages, start_page + max_visible - 1)
+    if end_page - start_page + 1 < max_visible:
+        start_page = max(1, end_page - max_visible + 1)
 
-    controls = st.columns(10)
-    with controls[0]:
-        if st.button("Previous", key=f"{widget_scope}_prev", disabled=current_page <= 1):
-            st.session_state[page_state_key] = current_page - 1
-            st.rerun()
+    display_tokens: list[str] = []
+    if start_page > 1:
+        display_tokens.append("1")
+        if start_page > 2:
+            display_tokens.append("...")
+    for p in range(start_page, end_page + 1):
+        display_tokens.append(str(p))
+    if end_page < total_pages:
+        if end_page < total_pages - 1:
+            display_tokens.append("...")
+        display_tokens.append(str(total_pages))
 
-    btn_idx = 1
-    for page in range(start_page, end_page + 1):
-        if btn_idx >= 9:
-            break
-        with controls[btn_idx]:
-            if st.button(
-                str(page),
-                key=f"{widget_scope}_num_{page}",
-                type="primary" if page == current_page else "secondary",
-            ):
-                st.session_state[page_state_key] = page
+    token_widths: list[float] = []
+    for token in display_tokens:
+        if token == "...":
+            token_widths.append(0.8)
+        else:
+            # Dynamically size each page slot by label length (e.g., "93" wider than "7").
+            token_widths.append(max(1.0, 0.7 + 0.35 * len(token)))
+
+    # Center a compact dynamic-width row: Prev | tokens | Next.
+    prev_next_width = 1.8
+    row_width = (2 * prev_next_width) + sum(token_widths)
+    outer = st.columns([1.0, row_width, 1.0])
+    with outer[1]:
+        row_cols = st.columns([prev_next_width] + token_widths + [prev_next_width])
+
+        with row_cols[0]:
+            if st.button("Prev", key=f"{widget_scope}_prev", disabled=current_page <= 1, use_container_width=True):
+                next_page = current_page - 1
+                st.session_state[page_state_key] = next_page
                 st.rerun()
-        btn_idx += 1
 
-    with controls[9]:
-        if st.button("Next", key=f"{widget_scope}_next", disabled=current_page >= total_pages):
-            st.session_state[page_state_key] = current_page + 1
-            st.rerun()
+        for idx, token in enumerate(display_tokens, start=1):
+            with row_cols[idx]:
+                if token == "...":
+                    st.markdown("<div style='text-align:center; color:#6f7f96; padding-top:6px;'>...</div>", unsafe_allow_html=True)
+                else:
+                    page_num = int(token)
+                    if page_num == current_page:
+                        st.button(
+                            token,
+                            key=f"{widget_scope}_num_{token}",
+                            type="primary",
+                            disabled=True,
+                            use_container_width=True,
+                        )
+                    else:
+                        if st.button(token, key=f"{widget_scope}_num_{token}", use_container_width=True):
+                            st.session_state[page_state_key] = page_num
+                            st.rerun()
 
-    st.caption(f"Page {current_page} of {total_pages}")
+        with row_cols[-1]:
+            if st.button("Next", key=f"{widget_scope}_next", disabled=current_page >= total_pages, use_container_width=True):
+                next_page = current_page + 1
+                st.session_state[page_state_key] = next_page
+                st.rerun()
+
+    st.markdown(
+        f"<div style='text-align:center; color:#9ca8ba; font-size:12px; margin-top:2px;'>Page {current_page} of {total_pages}</div>",
+        unsafe_allow_html=True,
+    )
     return current_page
 
 
@@ -921,7 +974,6 @@ def render_comments_section(df: pd.DataFrame):
 def main():
     st.set_page_config(page_title="SC4021 Opinion Search Engine", layout="wide")
     st.title("SC4021 Opinion Search Engine")
-    st.caption("Question 2 + Question 3 implementation (Whoosh + Streamlit)")
 
     if not os.path.exists(DATA_PATH):
         st.error("Missing data/comments_relevant.csv. Please ensure the file exists.")
@@ -978,12 +1030,6 @@ def main():
 
         family_options = ["All"] + sorted(df["family"].dropna().astype(str).unique().tolist())
         category_options = ["All"] + sorted(df["category"].dropna().astype(str).unique().tolist())
-        sentiment_options = ["All"] + sorted(
-            df["suggested_sentiment_label"].dropna().astype(str).unique().tolist()
-        )
-
-        aspect_values = sorted({a for v in df["aspects"].astype(str).tolist() for a in v.split("|")})
-        aspect_options = ["All"] + aspect_values
 
         selected_family = st.selectbox("Brand", family_options, key="family_filter", on_change=on_facet_change)
 
@@ -1008,17 +1054,12 @@ def main():
                 st.caption(f"Brand auto-aligned to {mapped_family} for model {selected_bucket}.")
 
         selected_category = st.selectbox("Category", category_options, key="category_filter", on_change=on_facet_change)
-        show_advanced = st.checkbox("Show Advanced Facets", value=False, on_change=on_facet_change)
 
-        if show_advanced:
-            selected_sentiment = st.selectbox("Sentiment", sentiment_options, key="sentiment_filter", on_change=on_facet_change)
-            selected_aspect = st.selectbox("Aspect", aspect_options, key="aspect_filter", on_change=on_facet_change)
-        else:
-            selected_sentiment = "All"
-            selected_aspect = "All"
+        # Advanced facets removed for simpler interaction flow.
+        selected_sentiment = "All"
+        selected_aspect = "All"
 
-        include_replies = st.checkbox("Include Replies", key="include_replies_filter", on_change=on_facet_change)
-        auto_model_lock = st.checkbox("Auto-lock detected model from query", value=True)
+        include_replies = True
 
         enable_date_filter = st.checkbox("Enable Date Range", key="enable_date_filter", on_change=on_facet_change)
         if min_date is not None and max_date is not None:
@@ -1049,20 +1090,21 @@ def main():
     query_mode = st.session_state.get("query_mode", "all")
     effective_query_text = query_text if query_mode == "text" else ""
 
-    inferred_bucket = infer_bucket_from_query(effective_query_text, all_buckets) if auto_model_lock else None
+    inferred_bucket = infer_bucket_from_query(effective_query_text, all_buckets)
     inferred_family = infer_family_from_query(effective_query_text, all_families)
     inferred_category = infer_category_from_query(effective_query_text)
+    applied_rules: list[str] = []
 
     effective_bucket = selected_bucket
     if inferred_bucket is not None:
         effective_bucket = inferred_bucket
-        st.caption(f"Rule applied: detected model in query -> bucket fixed to {inferred_bucket}")
+        applied_rules.append(f"Model detected -> bucket fixed to {inferred_bucket}")
 
     # Family rule: query-mentioned brand should constrain results.
     effective_family = selected_family
     if inferred_family is not None:
         effective_family = inferred_family
-        st.caption(f"Rule applied: detected brand in query -> family fixed to {inferred_family}")
+        applied_rules.append(f"Brand detected -> family fixed to {inferred_family}")
 
     # Model rule is more specific than family rule; keep them consistent.
     if inferred_bucket is not None:
@@ -1073,7 +1115,18 @@ def main():
     effective_category = selected_category
     if inferred_category is not None:
         effective_category = inferred_category
-        st.caption(f"Rule applied: detected topic in query -> category fixed to {inferred_category}")
+        applied_rules.append(f"Topic detected -> category fixed to {inferred_category}")
+
+    if applied_rules:
+        lines = "".join(f"<div style='margin:1px 0;'>{html.escape(rule)}</div>" for rule in applied_rules)
+        st.markdown(
+            f"""
+            <div style="margin:4px 0 8px 0; padding:6px 10px; border:1px solid #2b313d; border-radius:8px; background:#141923; color:#b7c2d4; font-size:12px; line-height:1.2;">
+                {lines}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     query_start = time.perf_counter()
 
@@ -1111,8 +1164,28 @@ def main():
     latency_ms = (time.perf_counter() - query_start) * 1000.0
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("Result Count", int(len(result_df)))
-    m2.metric("Latency (ms)", f"{latency_ms:.2f}")
+    with m1:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #2b313d; border-radius:10px; padding:8px 10px; background:#12161e;">
+              <div style="font-size:12px; color:#9ca8ba; margin-bottom:4px;">Result Count</div>
+              <div style="font-size:16px; line-height:1.25; color:#e8edf3; font-weight:700;">{int(len(result_df))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with m2:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #2b313d; border-radius:10px; padding:8px 10px; background:#12161e;">
+              <div style="font-size:12px; color:#9ca8ba; margin-bottom:4px;">Latency (ms)</div>
+              <div style="font-size:16px; line-height:1.25; color:#e8edf3; font-weight:700;">{latency_ms:.2f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     if effective_query_text.strip():
         query_label = effective_query_text
     else:
@@ -1124,7 +1197,18 @@ def main():
         if selected_category != "All":
             facet_parts.append(f"category={selected_category}")
         query_label = " | ".join(facet_parts) if facet_parts else "<all>"
-    m3.metric("Query", query_label)
+    with m3:
+        st.markdown(
+            f"""
+            <div style="border:1px solid #2b313d; border-radius:10px; padding:8px 10px; background:#12161e;">
+              <div style="font-size:12px; color:#9ca8ba; margin-bottom:4px;">Query</div>
+                            <div style="font-size:16px; line-height:1.25; color:#e8edf3; font-weight:700; white-space:normal; overflow-wrap:anywhere; word-break:break-word;">{html.escape(query_label)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
     # Summary is the first tab so it is the default visible section.
     tab_summary, tab_results, tab_compare = st.tabs(["Summary", "Ranked Results", "Compare Sentiment"])
