@@ -133,7 +133,7 @@ class TextPreprocessor:
         '''
         if not text:
             return text
-        return emoji.demojize(text, delimiters=("emoji_", ""))
+        return emoji.demojize(text, delimiters=("emoji_", " "))
 
     def expand_common_abbreviations(self, text: str) -> str:
         '''
