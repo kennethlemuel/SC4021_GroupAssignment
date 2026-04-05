@@ -3,5 +3,4 @@ venv/
 .env
 __pycache__/
 *.pyc
-nltk_data/
 data/sample_cleaned_preview.csv

@@ -2,8 +2,6 @@ requests
 pandas
 python-dotenv
 tqdm
-nltk
-emoji
 logging
 pathlib
 typing
@@ -13,3 +11,6 @@ streamlit
 plotly
 wordcloud
 matplotlib
+ftfy
+unicodedata
+emoji
