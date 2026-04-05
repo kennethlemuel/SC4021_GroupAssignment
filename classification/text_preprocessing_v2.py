@@ -148,7 +148,7 @@ class TextPreprocessor:
     
     def clean_basic_text(self, text):
         '''
-        function to normalise punctuation, removes urls, mentions, invisible unicode artefacts
+        function to normalise punctuation, normalise urls, mentions, invisible unicode artefacts
         '''
         if not text:
             return text
@@ -158,8 +158,8 @@ class TextPreprocessor:
 
         text = INVISIBLE_CHARS_PATTERN.sub("", text) # remove zero-width and invisible characters
         text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'") # normalise quotes
-        text = MENTION_PATTERN.sub(" ", text) # remove mentions of other youtube users
-        text = URL_PATTERN.sub(" ", text) # remove urls 
+        text = MENTION_PATTERN.sub(" @USER ", text) # normalise mentions of other youtube users
+        text = URL_PATTERN.sub(" URL ", text) # normalise urls 
         text = COMMA_IN_NUMBER.sub("", text) # preserves numbers with commas as one word 
 
         text = SPACE_BEFORE_PUNCT_PATTERN.sub(r"\1", text) # remove spaces before punctuation
