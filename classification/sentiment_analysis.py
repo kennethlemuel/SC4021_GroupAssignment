@@ -187,7 +187,7 @@ def run_sentiment_analysis(input_csv, output_csv):
 
     # 1. Load dataset
     df = pd.read_csv(input_csv)
-    df = df[["text", "comment_category", "final_subjectivity_label"]].dropna()
+    df = df[["comment_id", "text", "comment_category", "final_subjectivity_label"]].dropna()
 
     # 2. Split by subjectivity label
     subjective_mask = df["final_subjectivity_label"] == "Subjective"
@@ -241,6 +241,7 @@ def run_sentiment_analysis(input_csv, output_csv):
 
     # 7. Combine results and save
     FINAL_COLS = [
+    "comment_id",
     "text",
     "comment_category",
     "final_subjectivity_label",

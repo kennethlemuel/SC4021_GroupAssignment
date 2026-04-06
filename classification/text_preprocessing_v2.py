@@ -254,7 +254,7 @@ def run_text_preprocessing():
     preprocessor = TextPreprocessor(config) # Set up preprocesser
 
     logger.info(f"Loading data from {UNPROCESSED_CANDIDATES}...")
-    df = pd.read_csv(UNPROCESSED_CANDIDATES, usecols=["text", "comment_category"])
+    df = pd.read_csv(UNPROCESSED_CANDIDATES, usecols=["comment_id", "text", "comment_category"])
     
     # Sampling dataset for testing
     if config.sample_size:

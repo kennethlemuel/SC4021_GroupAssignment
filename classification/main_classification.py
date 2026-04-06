@@ -28,13 +28,13 @@ def main():
 
     print(f"\nFinal output saved to: {sentiment_input_csv}")
 
-'''
+
     print("\n[4/4] Running evaluation...")
 
-    ground_truth_csv = "data/annotation_candidates.csv"
+    ground_truth_csv = "data/eval_test.csv"
     sentiment_analysis_csv = "data/sentiment_analysis_results.csv"
-    key_columns = ["text", "comment_category"]
-    ground_truth_col = "sentiment_label"
+    key_columns = ["comment_id"]
+    ground_truth_col = "annotator_1 (ken)"
     sentiment_prediction_cols = ["final_base_sentiment","final_finetuned_sentiment","final_large_sentiment"]
 
     # Load ground truth (annotated labels)
@@ -128,7 +128,7 @@ def main():
 
     print("\nSaved classification evaluation summary to: data/classification_evaluation_summary.csv")
     print(summary_df)
-'''
+
 
 if __name__ == "__main__":
     main()
