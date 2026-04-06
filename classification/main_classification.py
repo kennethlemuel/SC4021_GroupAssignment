@@ -12,12 +12,12 @@ def main():
     # print(f"Preprocessed rows: {len(df_preprocessed)}")
 
 
-    print("\n[2/4] Running subjectivity detection...")
-    subjectivity_input_csv = "data/annotation_candidates_cleaned.csv"
-    subjectibity_output_csv = "data/subjectivity_detection_results.csv"
-    text_col = "cleaned_comments"
-    df_subjectivity = run_subjectivity_detection(subjectivity_input_csv, subjectibity_output_csv, text_col)
-    print(f"Number of rows after subjectivity detection: {len(df_subjectivity)}")
+    # print("\n[2/4] Running subjectivity detection...")
+    # subjectivity_input_csv = "data/annotation_candidates_cleaned.csv"
+    # subjectibity_output_csv = "data/subjectivity_detection_results.csv"
+    # text_col = "cleaned_comments"
+    # df_subjectivity = run_subjectivity_detection(subjectivity_input_csv, subjectibity_output_csv, text_col)
+    # print(f"Number of rows after subjectivity detection: {len(df_subjectivity)}")
 
 
     print("\n[3/4] Running sentiment analysis...")

@@ -4,16 +4,28 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipe
 
 FINETUNED_DEBERTA_BASE_BEST_PATH = "classification/checkpoints/deberta-base-finetuned-best"
 
+# ASPECT_PROMPTS = {
+#     "camera": "photo and video quality",
+#     "battery": "battery life",
+#     "display": "display and user interface",
+#     "price": "price and value",
+#     "software": "software",
+#     "design": "phone design",
+#     "performance": "performance and speed",
+#     "charging": "charging",
+#     "storage": "storage capacity",
+# }
+
 ASPECT_PROMPTS = {
-    "camera": "photo and video quality",
-    "battery": "battery life",
-    "display": "display and user interface",
-    "price": "price and value",
+    "camera": "camera",
+    "battery": "battery",
+    "display": "display",
+    "price": "price",
     "software": "software",
-    "design": "phone design",
-    "performance": "performance and speed",
+    "design": "design",
+    "performance": "performance",
     "charging": "charging",
-    "storage": "storage capacity",
+    "storage": "storage",
 }
 
 ABSA_LABELS   = ["negative", "neutral", "positive"]
