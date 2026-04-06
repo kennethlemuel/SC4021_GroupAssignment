@@ -35,7 +35,7 @@ def main():
     sentiment_analysis_csv = "data/sentiment_analysis_results.csv"
     key_columns = ["comment_id"]
     ground_truth_col = "annotator_1 (ken)"
-    sentiment_prediction_cols = ["final_base_sentiment","final_finetuned_sentiment","final_large_sentiment"]
+    sentiment_prediction_col = ["final_sentiment"]
 
     # Load ground truth (annotated labels)
     gt_df = pd.read_csv(ground_truth_csv)
@@ -45,10 +45,10 @@ def main():
 
     # Keep only needed columns
     gt_df = gt_df[key_columns + [ground_truth_col]].copy()
-    pred_df = pred_df[key_columns + sentiment_prediction_cols].copy()
+    pred_df = pred_df[key_columns + sentiment_prediction_col].copy()
 
     # Clean text (important for matching)
-    for col in key_columns + [ground_truth_col] + sentiment_prediction_cols:
+    for col in key_columns + [ground_truth_col] + sentiment_prediction_col:
         if col in pred_df.columns:
             pred_df[col] = pred_df[col].astype(str).str.strip()
         if col in gt_df.columns:
@@ -65,7 +65,7 @@ def main():
 
     summary_results = []
 
-    for pred_col in sentiment_prediction_cols:
+    for pred_col in sentiment_prediction_col:
 
         print("\n" + "=" * 80)
         print(f"Evaluating: {pred_col}")
