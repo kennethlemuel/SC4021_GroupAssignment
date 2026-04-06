@@ -246,7 +246,7 @@ class TextPreprocessor:
         return df
 
 
-def main():
+def run_text_preprocessing():
     config = PreprocessingConfig(
         sample_size=None  # use None for full dataset, reconfig for testing with different sample sizes
     )
@@ -276,6 +276,4 @@ def main():
         return
     logger.info("Done!")
 
-
-if __name__ == "__main__":
-    main()
+    return df_processed

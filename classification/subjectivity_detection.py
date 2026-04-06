@@ -3,7 +3,7 @@ from transformers import pipeline
 from senticnet.senticnet import SenticNet
 
 
-def run_gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_threshold: float = 0.7):
+def gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_threshold: float = 0.7):
     """
     Primary subjectivity classifier using GroNLP mDeBERTa model
     Labels: SUBJ -> Opinion, OBJ -> Fact
@@ -67,7 +67,7 @@ def run_gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_thres
     return df
 
 
-def run_senticnet_subjectivity(df, text_col):
+def senticnet_subjectivity(df, text_col):
     """
     SenticNet fallback for low-confidence (<0.7) GroNLP predictions
     Uses average absolute polarity magnitude across tokens as subjectivity signal
@@ -125,21 +125,15 @@ def run_senticnet_subjectivity(df, text_col):
 
     return df
 
-
-def main():
-    input_csv = "data/annotation_candidates_cleaned.csv"
-    output_csv = "data/subjectivity_detection_results.csv"
-    text_col = "cleaned_comments"
+def run_subjectivity_detection(input_csv, output_csv, text_col):
 
     df = pd.read_csv(input_csv)
-    
-    # df = df.head(100)
 
     print("Running GroNLP subjectivity model...")
-    df = run_gronlp_subjectivity(df, text_col)
+    df = gronlp_subjectivity(df, text_col)
 
     print("Running SenticNet fallback for low-confidence model predictions...")
-    df = run_senticnet_subjectivity(df, text_col)
+    df = senticnet_subjectivity(df, text_col)
 
     # Summary
     total = len(df)
@@ -157,6 +151,4 @@ def main():
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
     print(f"\nSubjectivity detection completed")
 
-
-if __name__ == "__main__":
-    main()
+    return df

@@ -4,3 +4,4 @@ venv/
 __pycache__/
 *.pyc
 data/sample_cleaned_preview.csv
+classification/checkpoints/
