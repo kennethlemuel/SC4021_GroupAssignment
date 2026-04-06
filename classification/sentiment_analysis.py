@@ -108,8 +108,8 @@ def run_normal_sentiment_analysis(df_overall, roberta_pipe):
 def predict_absa(text, aspect, tokenizer, model, model_name="model"):
     try:
         inputs = tokenizer(
-            aspect,
             text,
+            aspect,
             return_tensors="pt",
             padding=True,
             truncation=True,
