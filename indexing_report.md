@@ -162,5 +162,24 @@ streamlit run streamlit_search_engine.py
 3. If schema/field changes were made, click `Rebuild Index` once after launch.
 
 ## 8. Main Artifacts
-- `streamlit_search_engine.py`
+- `streamlit_search_engine.py` (thin entrypoint + backwards-compatible exports)
 - `indexing_report.md`
+- `search_engine/config.py` (constants, weights, field lists)
+- `search_engine/data_utils.py` (type normalization, datetime parsing, aspect detection)
+- `search_engine/indexing.py` (Whoosh schema, indexing, query execution)
+- `search_engine/ranking.py` (post-retrieval filtering and fixed reranking)
+- `search_engine/inference.py` (model/brand/category inference + out-of-scope detection)
+- `search_engine/state.py` (Streamlit session-state defaults and callbacks)
+- `search_engine/charts.py` (summary visualizations)
+- `search_engine/components.py` (result cards, pagination, comment ordering)
+- `search_engine/compare.py` (Compare Sentiment workflow)
+- `search_engine/app.py` (main Streamlit page orchestration)
+
+## 9. Refactoring Notes
+The original single-file implementation was reorganized into a package to improve readability, change isolation, and maintainability.
+
+Design principles used:
+1. Separation of concerns: indexing, inference, ranking, UI state, and rendering are in separate modules.
+2. Stable entrypoint: existing command `streamlit run streamlit_search_engine.py` remains unchanged.
+3. Backward compatibility: key functions are still importable from `streamlit_search_engine.py` via re-export.
+4. Behavior parity: all previously implemented features (query-mode switching, strict model matching, out-of-scope guard, dynamic pagination, compare sentiment) are preserved.
