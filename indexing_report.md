@@ -1,169 +1,166 @@
 # SC4021 Information Retrieval 2026
 ## Indexing and Querying Report (Question 2 and Question 3)
 
-## Objective Alignment
-This component implements an opinion search engine over smartphone-related user comments.
-The indexed corpus is `data/comments_relevant.csv`, which contains opinion-centric comments and supporting metadata.
-The goal is to provide:
-1. Text retrieval over opinions for a given phone model/topic.
-2. Sentiment-oriented exploration of retrieved opinions.
-3. Multifaceted access to refine and compare results.
+## 1. System Objective
+This project implements an opinion-focused search engine over smartphone comments using an inverted index (Whoosh) and a Streamlit interface.
 
-## Data Used for Indexing
-Primary file:
+The system supports:
+1. Text retrieval over user comments.
+2. Faceted filtering (brand, model, category, date range).
+3. Deterministic reranking for more useful opinion ordering.
+4. Sentiment and category visual analytics.
+5. Side-by-side sentiment comparison between two user queries.
+
+## 2. Indexed Dataset and Fields
+Primary dataset:
 - `data/comments_relevant.csv`
 
-Key indexed information:
-- Text content: `text`, `video_title`, `search_query`
-- Phone facets: `family`, `bucket`, `variant`
-- Context facets: `category`, `is_reply`, `published_at`
-- Sentiment fields: `suggested_sentiment_label`, `relevance_score`
-- Engagement signal: `like_count`
+Index unit:
+- One comment row = one indexed document.
 
-## Indexing Method
-We use an inverted index implementation based on Whoosh.
-This satisfies the assignment requirement to use a text search engine approach and avoids SQL-only text retrieval.
-
-### Indexed Unit
-- One comment = one indexed document
-
-### Searchable Fields
+Core indexed/searched fields:
 - `text`
-- `bucket`
-- `family`
-- `category`
+- `bucket` (phone model)
+- `family` (brand)
+- `comment_category`
 - `video_title`
 - `search_query`
 
-### Filter/Facet Fields
-- `family`
-- `bucket`
+Stored metadata fields for filtering and presentation:
 - `variant`
-- `category`
-- `suggested_sentiment_label`
+- `aspects` (rule-derived)
+- `like_count`
+- `relevance_score`
 - `is_reply`
-- `aspects` (derived rule-based aspect tags)
+- `published_at`
+- `suggested_sentiment_label`
 
-### Ranking Strategy
-- Ranking is fixed in backend (no user-adjustable weighting) to keep UI simple and retrieval behavior consistent.
-- Final score uses a deterministic weighted combination:
+Important update:
+- Category logic now uses `comment_category` (not `category`) across indexing, filtering, and visualizations.
+
+## 3. Indexing and Query Pipeline
+### 3.1 Inverted Index Construction
+The system builds a Whoosh schema and writes each row as a document. Rebuild can be triggered from UI (`Rebuild Index`).
+
+### 3.2 Querying
+Base retrieval uses `MultifieldParser` over:
+- `text`, `bucket`, `family`, `comment_category`, `video_title`, `search_query`
+
+Additional constraints are added as query terms/ranges:
+- Category filter (`comment_category`)
+- Sentiment label
+- Reply inclusion
+- Date range (`published_at`)
+
+### 3.3 Post-Retrieval Filtering
+Further deterministic filtering occurs in DataFrame stage for:
+- Family
+- Model bucket
+- Category (`comment_category`)
+- Sentiment/aspect flags
+- Date range
+
+### 3.4 Fixed Reranking (Assignment-aligned)
+Final ranking score:
 
 $$
 	ext{FinalScore} = 0.55\cdot T + 0.20\cdot R + 0.15\cdot E + 0.10\cdot Q
 $$
 
 Where:
-- $T$: normalized Whoosh text relevance score (BM25-style signal)
-- $R$: normalized `relevance_score` from preprocessing
-- $E$: normalized $\log(1 + \text{like_count})$ engagement signal
-- $Q$: quality indicator (`1` for top-level comment, `0` for reply)
+- $T$: normalized lexical relevance score
+- $R$: normalized `relevance_score`
+- $E$: normalized $\log(1 + like\_count)$
+- $Q$: reply quality prior (`1` non-reply, `0` reply)
 
-Weight justification:
-- `0.55` text relevance: primary IR objective is textual topical match.
-- `0.20` relevance label: incorporates dataset-level opinion relevance without overpowering lexical retrieval.
-- `0.15` engagement: rewards comments with stronger community interaction while dampening outliers via log scaling.
-- `0.10` quality: slight preference for top-level comments because they are usually more self-contained opinions.
+Tie-break order:
+1. lexical score
+2. `relevance_score`
+3. `like_count`
 
-Tie-break order after `FinalScore`: Whoosh score, then `relevance_score`, then `like_count`.
+## 4. Implemented Product Features
+### 4.1 Query Mode Control (last-edited-wins)
+- Text query mode and facet mode are mutually exclusive.
+- Editing facets clears existing text input and switches to facet mode.
+- Submitting a new text query resets facets.
 
-## Question 2: Simple UI, 5 Queries, and Query Speed
-A simple Streamlit UI was implemented to support querying and exploration.
+### 4.2 Automatic Query Inference Rules
+From typed query text, the app can infer and lock:
+1. Model (`bucket`)
+2. Brand (`family`)
+3. Topic (`comment_category`)
 
-UI features:
-1. Query text box.
-2. Sidebar facets (brand/model/category/sentiment/aspect/reply).
-3. Ranked result table.
-4. Query latency metric (milliseconds).
-5. Summary and comparison tabs.
-6. Filter reset mechanisms:
-	- Manual `Reset Filters` button.
-	- Automatic filter reset when a new submitted query is different from the previous submitted query.
+Rule status is shown to user in a compact panel.
 
-Facet behavior notes:
-- Core facets (brand/model/category) are always shown.
-- Sentiment and aspect are exposed as advanced facets (optional) to reduce over-filtering and preserve sentiment spread analysis by default.
+### 4.3 Strict Base/Premium Model Disambiguation
+Model detection handles flexible separators and specific variants:
+- `iphone 17 pro`, `iphone17pro`, `iphone-17-pro`
 
-### Five Queries for Evaluation
-Use the following five queries and record speed/results in your final submission:
-1. `iphone 17 battery life`
-2. `galaxy s26 camera quality`
-3. `pixel 10 overheating issue`
-4. `samsung vs iphone charging speed`
-5. `xiaomi 15 ultra display`
+Longest-match and suffix-guard logic prevent mixing base and premium models.
 
-### Query Speed Table Template
-| Query | Filters | Results | Latency (ms) |
-|---|---|---:|---:|
-| iphone 17 battery life | None | [fill] | [fill] |
-| galaxy s26 camera quality | category=camera | [fill] | [fill] |
-| pixel 10 overheating issue | category=issue | [fill] | [fill] |
-| samsung vs iphone charging speed | family=Samsung | [fill] | [fill] |
-| xiaomi 15 ultra display | family=Xiaomi | [fill] | [fill] |
+### 4.4 Out-of-Scope Model Guard (new)
+To avoid misleading retrieval (e.g., `iphone 16` mapping to existing Apple models):
+1. If query contains clear model intent (recognized family + model token),
+2. but no known dataset model (`bucket`) is matched,
+3. then query is marked out-of-scope.
 
-## Question 3: Innovations for Indexing and Ranking
+Behavior:
+- Main search: shows warning and returns 0 results.
+- Compare Sentiment: validates Query A and Query B independently; if either is out-of-scope, shows warning and aborts comparison render.
 
-### Innovation 1: Multifaceted Search
-Problem:
-- Keyword-only search yields mixed and noisy result sets.
+### 4.5 Ranked Results Pagination
+- Ranked comments are paginated with top and bottom controls.
+- Navigation uses dynamic-width button layout to avoid compression with large page numbers.
 
-Solution:
-- Added facets for brand, phone model, category, sentiment, aspect, and reply mode.
+### 4.6 Summary Analytics
+The Summary tab includes:
+1. Sentiment distribution pie + platform sentiment indicator panel
+2. Category distribution bar chart (from `comment_category`)
+3. Results-over-time chart
+4. Word cloud (if optional dependencies are installed)
 
-Impact:
-- Users can rapidly narrow results to a specific intent.
+### 4.7 Compare Sentiment
+- Two query inputs under current sidebar filters.
+- Grouped sentiment comparison bar chart.
+- Dynamic legend labels now reflect actual Query A/Query B text.
+- Delta table reports positive%, negative%, and net sentiment difference.
 
-Example:
-- Query `battery`
-- Refinement: `bucket=Galaxy S26`, `category=battery`, `sentiment=negative`
-- Outcome: focused complaint/opinion set instead of broad mixed comments.
+## 5. UI/UX and Reporting Metrics
+Implemented UI characteristics:
+1. Unified metric cards: Result Count, Latency, Query.
+2. Actual measured end-to-end latency (including facet-only flow).
+3. Dark-theme visual consistency with muted sentiment palette.
+4. Clear warnings for empty results and out-of-scope model queries.
 
-### Innovation 2: Enhanced Search (Visual Summary)
-Problem:
-- Users cannot quickly infer opinion distribution from a raw list of comments.
+## 6. Assignment Questions Mapping
+### Question 2 (Simple UI + Query Performance)
+Delivered:
+1. Streamlit query interface with faceted retrieval.
+2. Query speed display in milliseconds.
+3. Ranked results and visual summaries.
 
-Solution:
-- Added summary charts (sentiment pie chart and category distribution chart).
+### Question 3 (Innovations)
+Delivered innovations:
+1. Multifaceted retrieval beyond plain keyword search.
+2. Deterministic hybrid reranking combining lexical + metadata signals.
+3. Comparative sentiment analytics for two queries.
+4. Out-of-scope model guard to enforce dataset validity and reduce false interpretation.
 
-Impact:
-- Supports instant macro-level interpretation for the current query and active filters.
-
-### Innovation 3: Comparative Opinion View
-Problem:
-- Users often need comparative insights between phone models.
-
-Solution:
-- Added side-by-side comparison for two phone models by sentiment and aspect mention frequency.
-
-Impact:
-- Enables decision-oriented retrieval based on user opinions rather than static specs.
-
-## Version Improvement Narrative
-Initial baseline:
-- Simple text query returning ranked comments.
-
-Improved system:
-1. Added faceted filtering.
-2. Added sentiment/category visual summaries.
-3. Added phone-to-phone comparative view.
-4. Added aspect-level filtering and visualization.
-
-These improvements solve discoverability and interpretability issues present in the baseline.
-
-## Run Instructions
+## 7. How to Run
 1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Launch app:
+2. Start app:
 
 ```bash
 streamlit run streamlit_search_engine.py
 ```
 
-3. Open local URL shown by Streamlit (usually `http://localhost:8501`).
+3. If schema/field changes were made, click `Rebuild Index` once after launch.
 
-## Files Produced
-- `streamlit_search_engine.py` (indexing + querying UI)
-- `indexing_report.md` (report-ready markdown for Question 2 and 3)
+## 8. Main Artifacts
+- `streamlit_search_engine.py`
+- `indexing_report.md`

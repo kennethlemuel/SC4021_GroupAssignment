@@ -435,6 +435,51 @@ def infer_family_from_query(query_text: str, all_families: list[str]) -> str | N
     return None
 
 
+def infer_unknown_model_from_query(
+    query_text: str,
+    all_buckets: list[str],
+    all_families: list[str],
+) -> str | None:
+    q = (query_text or "").strip()
+    if not q:
+        return None
+
+    # If we already matched a known model, the query is in-scope.
+    if infer_bucket_from_query(q, all_buckets) is not None:
+        return None
+
+    inferred_family = infer_family_from_query(q, all_families)
+    if inferred_family is None:
+        return None
+
+    lowered = q.casefold()
+
+    # Model intent heuristic: recognized phone family + model-number token in query.
+    has_model_number = bool(re.search(r"\b(?:\d{1,3}|[a-z]\d{1,3})\b", lowered))
+    if not has_model_number:
+        return None
+
+    alias_map = {
+        "apple": ["iphone", "ios", "apple"],
+        "samsung": ["galaxy", "samsung"],
+        "google": ["pixel", "google"],
+        "xiaomi": ["xiaomi", "mi", "redmi"],
+    }
+    aliases = alias_map.get(inferred_family.casefold(), [inferred_family.casefold()])
+    alias_expr = "|".join(re.escape(a) for a in aliases)
+
+    candidate_patterns = [
+        rf"\b(?:{alias_expr})\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:pro|max|plus|ultra|mini|fold|flip|edge|fe))?\b",
+        r"\b[a-z]\d{1,3}(?:\W*(?:pro|max|plus|ultra|mini|fold|flip|edge|fe))?\b",
+    ]
+    for pattern in candidate_patterns:
+        match = re.search(pattern, lowered, flags=re.IGNORECASE)
+        if match:
+            return q[match.start():match.end()].strip()
+
+    return q
+
+
 def reset_filters() -> None:
     st.session_state["family_filter"] = "All"
     st.session_state["bucket_filter"] = "All"
@@ -621,7 +666,21 @@ def render_sentiment_comparison(
     enable_date_filter: bool,
     start_date: date | None,
     end_date: date | None,
+    all_buckets: list[str],
+    all_families: list[str],
 ):
+    unknown_a = infer_unknown_model_from_query(query_a, all_buckets, all_families)
+    unknown_b = infer_unknown_model_from_query(query_b, all_buckets, all_families)
+    if unknown_a or unknown_b:
+        messages: list[str] = []
+        if unknown_a:
+            messages.append(f"Query A is outside dataset scope (unknown model: {unknown_a}).")
+        if unknown_b:
+            messages.append(f"Query B is outside dataset scope (unknown model: {unknown_b}).")
+        messages.append("This dataset only supports comparisons for phone models present in the indexed records.")
+        st.warning(" ".join(messages))
+        return
+
     q1_df, _ = search(
         ix,
         query_a,
@@ -681,15 +740,22 @@ def render_sentiment_comparison(
     q1_counts = sentiment_counts(q1_filtered)
     q2_counts = sentiment_counts(q2_filtered)
 
+    query_a_label = (query_a or "").strip() or "Query A"
+    query_b_label = (query_b or "").strip() or "Query B"
+    if query_a_label == query_b_label:
+        query_b_label = f"{query_b_label} (B)"
+
     labels = ["positive", "neutral", "negative"]
-    compare_df = pd.DataFrame(
-        {
-            "sentiment": labels,
-            "Query A": [q1_counts[label] for label in labels],
-            "Query B": [q2_counts[label] for label in labels],
-        }
+    compare_long = pd.DataFrame(
+        [
+            {"sentiment": label, "query": query_a_label, "count": q1_counts[label]}
+            for label in labels
+        ]
+        + [
+            {"sentiment": label, "query": query_b_label, "count": q2_counts[label]}
+            for label in labels
+        ]
     )
-    compare_long = compare_df.melt(id_vars=["sentiment"], var_name="query", value_name="count")
 
     fig_compare = px.bar(
         compare_long,
@@ -716,8 +782,8 @@ def render_sentiment_comparison(
     delta_df = pd.DataFrame(
         {
             "metric": ["Positive %", "Negative %", "Net Sentiment %"],
-            "Query A": [q1_pos, q1_neg, net_a],
-            "Query B": [q2_pos, q2_neg, net_b],
+            query_a_label: [q1_pos, q1_neg, net_a],
+            query_b_label: [q2_pos, q2_neg, net_b],
             "Difference (B - A)": [q2_pos - q1_pos, q2_neg - q1_neg, net_b - net_a],
         }
     )
@@ -990,7 +1056,8 @@ def main():
 
     with st.sidebar:
         st.header("Index Controls")
-        rebuild = st.button("Rebuild Index")
+        rebuild = st.button("Rebuild Index", use_container_width=True)
+        st.markdown("---")
 
     ix = get_index(df, force_rebuild=rebuild)
 
@@ -1063,22 +1130,24 @@ def main():
 
         enable_date_filter = st.checkbox("Enable Date Range", key="enable_date_filter", on_change=on_facet_change)
         if min_date is not None and max_date is not None:
-            selected_start_date = st.date_input(
-                "From",
-                min_value=min_date,
-                max_value=max_date,
-                key="start_date_filter",
-                disabled=not enable_date_filter,
-                on_change=on_facet_change,
-            )
-            selected_end_date = st.date_input(
-                "To",
-                min_value=min_date,
-                max_value=max_date,
-                key="end_date_filter",
-                disabled=not enable_date_filter,
-                on_change=on_facet_change,
-            )
+            if enable_date_filter:
+                selected_start_date = st.date_input(
+                    "From",
+                    min_value=min_date,
+                    max_value=max_date,
+                    key="start_date_filter",
+                    on_change=on_facet_change,
+                )
+                selected_end_date = st.date_input(
+                    "To",
+                    min_value=min_date,
+                    max_value=max_date,
+                    key="end_date_filter",
+                    on_change=on_facet_change,
+                )
+            else:
+                selected_start_date = st.session_state.get("start_date_filter")
+                selected_end_date = st.session_state.get("end_date_filter")
         else:
             selected_start_date = None
             selected_end_date = None
@@ -1093,6 +1162,7 @@ def main():
     inferred_bucket = infer_bucket_from_query(effective_query_text, all_buckets)
     inferred_family = infer_family_from_query(effective_query_text, all_families)
     inferred_category = infer_category_from_query(effective_query_text)
+    inferred_unknown_model = infer_unknown_model_from_query(effective_query_text, all_buckets, all_families)
     applied_rules: list[str] = []
 
     effective_bucket = selected_bucket
@@ -1117,6 +1187,9 @@ def main():
         effective_category = inferred_category
         applied_rules.append(f"Topic detected -> category fixed to {inferred_category}")
 
+    if inferred_unknown_model is not None:
+        applied_rules.append(f"Out-of-scope model detected -> {inferred_unknown_model}")
+
     if applied_rules:
         lines = "".join(f"<div style='margin:1px 0;'>{html.escape(rule)}</div>" for rule in applied_rules)
         st.markdown(
@@ -1130,8 +1203,17 @@ def main():
 
     query_start = time.perf_counter()
 
+    query_out_of_scope = bool(inferred_unknown_model) and bool(effective_query_text.strip())
+
     # Queryless browsing should still work: use full dataset baseline when query is empty.
-    if effective_query_text.strip():
+    if query_out_of_scope:
+        st.warning(
+            f"The query references a phone model outside this dataset scope ({inferred_unknown_model}). "
+            "No results are returned."
+        )
+        search_df = df.iloc[0:0].copy()
+        search_df["score"] = pd.Series(dtype=float)
+    elif effective_query_text.strip():
         search_df, _search_latency_ms = search(
             ix,
             effective_query_text,
@@ -1250,6 +1332,8 @@ def main():
                     enable_date_filter,
                     selected_start_date,
                     selected_end_date,
+                    all_buckets,
+                    all_families,
                 )
 
 
