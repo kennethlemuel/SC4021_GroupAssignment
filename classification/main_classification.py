@@ -127,32 +127,32 @@ def main():
     # print("\n[1/3] Running text preprocessing...")
     # run_text_preprocessing()
 
-    # print("\n[2/3] Running subjectivity detection...")
-    # run_subjectivity()
+    print("\n[2/3] Running subjectivity detection...")
+    run_subjectivity()
 
     # Run sentiment analysis pipelines (pipelines 1 - 5) - FOR ABLATION STUDIES
 
-    # ### ============== COMMENT OUR UNNECESSARY RUNS DURING TESTING =================
+    # ### ============== COMMENT OUT UNNECESSARY RUNS DURING TESTING =================
 
     print("\n[3/3] Running sentiment analysis pipeline...")
 
-    # RUN 1: RoBERTa only (all rows)
-    run_pipeline_1(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run1.csv")
-    s = evaluate_run("Run1_RoBERTa_only", "data/sentiment_analysis_results_run1.csv")
-    if s: 
-        all_summaries.append(s)
+    # # RUN 1: RoBERTa only (all rows)
+    # run_pipeline_1(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run1.csv")
+    # s = evaluate_run("Run1_RoBERTa_only", "data/sentiment_analysis_results_run1.csv")
+    # if s: 
+    #     all_summaries.append(s)
 
-    # RUN 2: Text preprocessing + RoBERTa (all rows)
-    run_pipeline_2(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run2.csv")
-    s = evaluate_run("Run2_Preprocess+RoBERTa", "data/sentiment_analysis_results_run2.csv")
-    if s: 
-        all_summaries.append(s)
+    # # RUN 2: Text preprocessing + RoBERTa (all rows)
+    # run_pipeline_2(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run2.csv")
+    # s = evaluate_run("Run2_Preprocess+RoBERTa", "data/sentiment_analysis_results_run2.csv")
+    # if s: 
+    #     all_summaries.append(s)
 
-    # RUN 3: Text preprocessing + Subjectivity detection + RoBERTa (all rows)
-    run_pipeline_3(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run3.csv")
-    s = evaluate_run("Run3_Subjectivity+RoBERTa", "data/sentiment_analysis_results_run3.csv")
-    if s: 
-        all_summaries.append(s)
+    # # RUN 3: Text preprocessing + Subjectivity detection + RoBERTa (all rows)
+    # run_pipeline_3(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run3.csv")
+    # s = evaluate_run("Run3_Subjectivity+RoBERTa", "data/sentiment_analysis_results_run3.csv")
+    # if s: 
+    #     all_summaries.append(s)
 
     # RUN 4: Text preprocessing + Subjectivity detection + RoBERTa (overall) + DeBERTa-base (ABSA)
     run_pipeline_4(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run4.csv")
