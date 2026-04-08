@@ -1,4 +1,5 @@
 DATA_PATH = "data/comments_relevant.csv"
+SENTIMENT_RESULTS_PATH = "data/full_sentiment_analysis_results.csv"
 INDEX_DIR = "indexdir"
 SEARCH_FIELDS = ["text", "bucket", "family", "comment_category", "video_title", "search_query"]
 SEARCH_LIMIT = 10000

@@ -9,8 +9,8 @@ import streamlit as st
 
 from .charts import category_chart, results_over_time_chart, sentiment_chart, word_cloud_chart
 from .compare import render_sentiment_comparison
-from .config import DATA_PATH, SEARCH_LIMIT
-from .data_utils import ensure_types
+from .config import DATA_PATH, SEARCH_LIMIT, SENTIMENT_RESULTS_PATH
+from .data_utils import ensure_types, merge_final_sentiment
 from .inference import (
     infer_bucket_from_query,
     infer_category_from_query,
@@ -32,6 +32,7 @@ def main():
         return
 
     raw_df = pd.read_csv(DATA_PATH)
+    raw_df = merge_final_sentiment(raw_df, SENTIMENT_RESULTS_PATH)
     df = ensure_types(raw_df)
     init_session_state()
 

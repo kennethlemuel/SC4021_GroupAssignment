@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
@@ -36,4 +37,32 @@ def ensure_types(df: pd.DataFrame) -> pd.DataFrame:
 
     out["published_at"] = pd.to_datetime(out.get("published_at"), errors="coerce")
     out["aspects"] = out["text"].astype(str).apply(detect_aspects)
+    return out
+
+
+def merge_final_sentiment(df: pd.DataFrame, sentiment_csv_path: str) -> pd.DataFrame:
+    out = df.copy()
+    path = Path(sentiment_csv_path)
+    if not path.exists():
+        return out
+
+    try:
+        sentiment_df = pd.read_csv(path, usecols=["comment_id", "final_sentiment"])
+    except Exception:
+        return out
+
+    if sentiment_df.empty or "comment_id" not in out.columns:
+        return out
+
+    sentiment_map = (
+        sentiment_df.dropna(subset=["comment_id"])
+        .assign(comment_id=lambda d: d["comment_id"].astype(str))
+        .drop_duplicates(subset=["comment_id"], keep="last")
+        .set_index("comment_id")["final_sentiment"]
+    )
+
+    existing = out.get("suggested_sentiment_label", pd.Series([None] * len(out), index=out.index, dtype=object))
+    existing = existing.astype(object)
+    merged = out["comment_id"].astype(str).map(sentiment_map)
+    out["suggested_sentiment_label"] = merged.combine_first(existing)
     return out

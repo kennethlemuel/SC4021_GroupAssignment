@@ -98,7 +98,7 @@ Model detection handles flexible separators and specific variants:
 
 Longest-match and suffix-guard logic prevent mixing base and premium models.
 
-### 4.4 Out-of-Scope Model Guard (new)
+### 4.4 Out-of-Scope Model Guard
 To avoid misleading retrieval (e.g., `iphone 16` mapping to existing Apple models):
 1. If query contains clear model intent (recognized family + model token),
 2. but no known dataset model (`bucket`) is matched,
