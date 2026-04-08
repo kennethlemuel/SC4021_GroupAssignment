@@ -3,12 +3,13 @@ from sklearn.metrics import (accuracy_score, precision_recall_fscore_support, cl
 
 from text_preprocessing_v2 import run_text_preprocessing
 from subjectivity_detection import run_subjectivity_detection
+from sarcasm_detection import run_sarcasm_detection
 from sentiment_analysis import run_pipeline_1, run_pipeline_2, run_pipeline_3, run_pipeline_4, run_pipeline_5
 
 RAW_CSV = "data/annotation_candidates.csv"
 PREPROCESSED_CSV = "data/annotation_candidates_cleaned.csv"
 SUBJECTIVITY_CSV = "data/subjectivity_detection_results.csv"
-
+SARCASM_CSV = "data/sarcasm_detection_results.csv"
 GROUND_TRUTH_CSV = "data/eval_test.csv"
 GROUND_TRUTH_COL = "annotator_1 (ken)"
 KEY_COLUMNS = ["comment_id"]
@@ -20,6 +21,12 @@ def run_subjectivity():
     input_text_col = "cleaned_comments"
     df = run_subjectivity_detection(PREPROCESSED_CSV, SUBJECTIVITY_CSV, input_text_col)
     print(f"  Saved {len(df)} rows -> {SUBJECTIVITY_CSV}")
+
+# Detects sarcasm in subjective comments (save to SARCASM_CSV)
+def run_sarcasm(): 
+    input_text_col = "cleaned_comments"
+    df = run_sarcasm_detection(SUBJECTIVITY_CSV, SARCASM_CSV, input_text_col)
+    print(f"  Saved {len(df)} rows -> {SARCASM_CSV}")
 
 # Evaluation (merges classfication pipeline predictions with manuually annotated evaluation dataset and print a full evaluation report)
 def evaluate_run(run_label, pred_csv, pred_col="final_sentiment"):
@@ -124,17 +131,20 @@ def main():
 
     all_summaries = []
 
-    # print("\n[1/3] Running text preprocessing...")
+    # print("\n[1/4] Running text preprocessing...")
     # run_text_preprocessing()
 
-    # print("\n[2/3] Running subjectivity detection...")
+    # print("\n[2/4] Running subjectivity detection...")
     # run_subjectivity()
+
+    # print("\n[3/4] Running sarcasm detection...")
+    # run_sarcasm_detection()
 
     # Run sentiment analysis pipelines (pipelines 1 - 5) - FOR ABLATION STUDIES
 
     # ### ============== COMMENT OUR UNNECESSARY RUNS DURING TESTING =================
 
-    print("\n[3/3] Running sentiment analysis pipeline...")
+    print("\n[4/4] Running sentiment analysis pipeline...")
 
     # RUN 1: RoBERTa only (all rows)
     run_pipeline_1(input_csv = SUBJECTIVITY_CSV, output_csv = "data/sentiment_analysis_results_run1.csv")
