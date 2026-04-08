@@ -1,6 +1,10 @@
 import pandas as pd
 from transformers import pipeline
 from senticnet.senticnet import SenticNet
+from tqdm.auto import tqdm
+
+from transformers.utils import logging
+logging.set_verbosity_error()
 
 
 def gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_threshold: float = 0.7):
@@ -18,7 +22,7 @@ def gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_threshold
 
     total = len(texts)
 
-    for start_idx in range(0, total, batch_size):
+    for start_idx in tqdm(range(0, total, batch_size), desc="GroNLP subjectivity", unit="batch"):
         end_idx = min(start_idx + batch_size, total)
         batch_texts = [text.strip() for text in texts[start_idx:end_idx]]
 
@@ -35,13 +39,7 @@ def gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_threshold
                 non_empty_positions.append(i)
 
         if non_empty_texts:
-            results = classifier(non_empty_texts)
-
-            # # For debugging
-            # for pos, result in zip(non_empty_positions, results):
-            #     print(f"Text: {non_empty_texts[pos][:80]}")
-            #     print(f"Raw label: {result['label']}, Score: {result['score']:.4f}")
-            #     print()
+            results = classifier(non_empty_texts, batch_size=batch_size)
 
             for pos, result in zip(non_empty_positions, results):
                 label = "Subjective" if result["label"] == "LABEL_1" else "Objective"
@@ -57,8 +55,6 @@ def gronlp_subjectivity(df, text_col, batch_size: int = 16, confidence_threshold
         labels.extend(batch_labels)
         confidences.extend(batch_confidences)
         needs_fallback.extend(batch_fallback)
-
-        print(f"GroNLP processed {end_idx}/{total}")
 
     df["gronlp_subjectivity_label"] = labels
     df["gronlp_subjectivity_confidence"] = confidences
@@ -79,7 +75,7 @@ def senticnet_subjectivity(df, text_col):
     senticnet_scores = []
     senticnet_triggered = []
 
-    for i, row in df.iterrows():
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="SenticNet fallback", unit="row"):
         gronlp_label = row["gronlp_subjectivity_label"]
         fallback_needed = row["needs_senticnet_fallback"]
         text = str(row[text_col]).lower()

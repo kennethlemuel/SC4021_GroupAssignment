@@ -1,5 +1,6 @@
 import pandas as pd
 import torch
+from tqdm.auto import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 
 FINETUNED_DEBERTA_BASE_BEST_PATH = "classification/checkpoints/deberta-base-finetuned-best"
@@ -97,77 +98,111 @@ def load_deberta_finetuned():
 
 # ----- To run normal sentiment analysis (Twitter-Roberta) -----
 
-# Runs RoBERTa in batches of rows, returns (sentiments, confidences) lists
-def run_roberta(texts, roberta_pipe, tag="RoBERTa"):
-    sentiments, confidences = [], []
-    batch_size = 16
-    total = len(texts)
+# Runs RoBERTa on one batch only, returns (sentiments, confidences)
+def run_roberta(batch_texts, roberta_pipe):
+    results = roberta_pipe(batch_texts, truncation=True, max_length=512)
 
-    for start in range(0, total, batch_size):
-        batch   = texts[start:start + batch_size]
-        results = roberta_pipe(batch, truncation=True, max_length=512)
-        
-        for r in results:
-            label = r["label"].lower()
-            if label not in ["positive", "negative", "neutral"]:
-                label = OVERALL_LABELS.get(r["label"].upper(), "neutral")
-            sentiments.append(label)
-            confidences.append(round(r["score"], 4))
-        
-        print(f"    {tag}: {min(start + batch_size, total)}/{total}")
+    sentiments, confidences = [], []
+
+    for r in results:
+        label = r["label"].lower()
+        if label not in ["positive", "negative", "neutral"]:
+            label = OVERALL_LABELS.get(r["label"].upper(), "neutral")
+
+        sentiments.append(label)
+        confidences.append(round(r["score"], 4))
+
     return sentiments, confidences
 
 # To attach roberta_sentiment/roberta_confidence to every row in df
-def apply_roberta(df, roberta_pipe, tag="RoBERTa", text_col="text"):
+def apply_roberta(df, roberta_pipe, tag="RoBERTa", text_col="text", batch_size=16):
     df = df.copy()
     texts = df[text_col].fillna("").astype(str).tolist()
-    sentiments, confidences = run_roberta(texts, roberta_pipe, tag)
-    df["roberta_sentiment"] = sentiments
-    df["roberta_confidence"] = confidences
+
+    all_sentiments = []
+    all_confidences = []
+
+    for start in tqdm(range(0, len(texts), batch_size), desc=tag, unit="batch"):
+        batch_texts = texts[start:start + batch_size]
+        sentiments, confidences = run_roberta(batch_texts, roberta_pipe)
+
+        all_sentiments.extend(sentiments)
+        all_confidences.extend(confidences)
+
+    df["roberta_sentiment"] = all_sentiments
+    df["roberta_confidence"] = all_confidences
     return df
 
 # ----- To run aspect-based sentiment analysis (DeBERTa-base, DeBERTa-base-finetuned) -----
 
-# Runs ABSA model on every row
-def run_absa(text, aspect, tokenizer, model, model_name="model"):
+# Runs ABSA on one batch only, returns (sentiments, confidences)
+def run_absa(batch_texts, batch_aspects, tokenizer, model, model_name="model"):
     try:
+        device = next(model.parameters()).device
+
         inputs = tokenizer(
-            text, aspect,
+            batch_texts,
+            batch_aspects,
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=512, # may need adjust later
+            max_length=512 # may need adjust later
         )
+
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.no_grad():
             outputs = model(**inputs)
 
-        probs     = torch.softmax(outputs.logits, dim=-1).squeeze()
-        label_idx = torch.argmax(probs).item()
+        probs = torch.softmax(outputs.logits, dim=-1)
+        pred_indices = torch.argmax(probs, dim=-1)
 
-        return ABSA_LABELS[label_idx], round(probs[label_idx].item(), 4)
-    
+        sentiments = []
+        confidences = []
+
+        for i in range(len(batch_texts)):
+            label_idx = pred_indices[i].item()
+            conf = probs[i][label_idx].item()
+
+            sentiments.append(ABSA_LABELS[label_idx])
+            confidences.append(round(conf, 4))
+
+        return sentiments, confidences
+
     except Exception as e:
-        print(f"    {model_name} error on row: {e}")
-        return "error", 0.0
+        print(f"    {model_name} batch error: {e}")
+        return ["error"] * len(batch_texts), [0.0] * len(batch_texts)
 
 # To attach sent_col/conf_col to df
-def apply_absa(df, tokenizer, model, sent_col, conf_col, model_name="DeBERTa", text_col="text"):
+def apply_absa(df, tokenizer, model, sent_col, conf_col, model_name="DeBERTa", text_col="text", batch_size=16):
     df = df.copy()
-    
+
     if "aspect_input" not in df.columns:
         df["aspect_input"] = df["comment_category"].apply(rephrase_aspect)
-    sentiments, confidences = [], []
-    total = len(df)
-    
-    for i, (_, row) in enumerate(df.iterrows()):
-        s, c = run_absa(str(row[text_col]), str(row["aspect_input"]), tokenizer, model, model_name)
-        sentiments.append(s)
-        confidences.append(c)
-        if (i + 1) % 10 == 0:
-            print(f"    {model_name} ABSA: {i + 1}/{total}")
-    df[sent_col] = sentiments
-    df[conf_col] = confidences
+
+    texts = df[text_col].fillna("").astype(str).tolist()
+    aspects = df["aspect_input"].fillna("").astype(str).tolist()
+
+    all_sentiments = []
+    all_confidences = []
+
+    for start in tqdm(range(0, len(df), batch_size), desc=f"{model_name} ABSA", unit="batch"):
+        batch_texts = texts[start:start + batch_size]
+        batch_aspects = aspects[start:start + batch_size]
+
+        sentiments, confidences = run_absa(
+            batch_texts,
+            batch_aspects,
+            tokenizer,
+            model,
+            model_name
+        )
+
+        all_sentiments.extend(sentiments)
+        all_confidences.extend(confidences)
+
+    df[sent_col] = all_sentiments
+    df[conf_col] = all_confidences
     return df
 
 # ----- Runs -----
