@@ -1,7 +1,7 @@
 import pandas as pd
 from sklearn.metrics import (accuracy_score, precision_recall_fscore_support, classification_report, confusion_matrix)
 
-from text_preprocessing_v2 import run_text_preprocessing
+from classification.text_preprocessing import run_text_preprocessing
 from subjectivity_detection import run_subjectivity_detection
 from sarcasm_detection import run_sarcasm_detection
 from sentiment_analysis import run_roberta_full, run_roberta_with_deberta_base, run_roberta_with_deberta_base_finetuned
