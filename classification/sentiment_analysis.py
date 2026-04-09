@@ -232,8 +232,8 @@ def apply_absa(df, tokenizer, model, sent_col, conf_col, model_name="DeBERTa", t
 def split_subjectivity(df):
     df_subj = df[df["final_subjectivity_label"] == "Subjective"].copy()
     df_obj = df[df["final_subjectivity_label"] == "Objective"].copy()
-    df_overall = df_subj[df_subj["comment_category"] == "overall"].copy()
-    df_aspect = df_subj[df_subj["comment_category"].isin(ASPECT_CATEGORIES)].copy()
+    df_overall = df[df["comment_category"] == "overall"].copy()
+    df_aspect = df[df["comment_category"].isin(ASPECT_CATEGORIES)].copy()
     return df_subj, df_obj, df_overall, df_aspect
 
 
@@ -299,9 +299,11 @@ def run_roberta_with_deberta_base(input_csv, output_csv):
     df_aspect["final_confidence"] = df_aspect["deberta_base_confidence"]
     print("  Applying sarcasm polarity flip to aspect rows...")
     df_aspect = apply_sarcasm_flip(df_aspect, sentiment_col="final_sentiment", confidence_col="final_confidence")
+    df_overall.loc[df_overall["final_subjectivity_label"] == "Objective", "final_sentiment"] = "neutral"
+    df_aspect.loc[df_aspect["final_subjectivity_label"] == "Objective", "final_sentiment"] = "neutral"  
 
     COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label", "pipeline", "sarcasm_label", "sarcasm_flipped", "roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_sentiment", "deberta_base_confidence", "final_sentiment", "final_confidence"]
-    df_out = pd.concat([df_overall, df_aspect, df_obj_out], ignore_index=True)
+    df_out = pd.concat([df_overall, df_aspect], ignore_index=True)
     print_summary(df_combined=df_out, df_overall=df_overall, df_aspect=df_aspect, df_objective=df_obj_out)
     return save_df(df_out, output_csv, COLS)
 
@@ -352,9 +354,11 @@ def run_roberta_with_deberta_base_finetuned(input_csv, output_csv):
     df_aspect["final_confidence"] = df_aspect["deberta_base_finetuned_confidence"]
     print("  Applying sarcasm polarity flip to aspect rows...")
     df_aspect = apply_sarcasm_flip(df_aspect, sentiment_col="final_sentiment", confidence_col="final_confidence")
- 
+    df_overall.loc[df_overall["final_subjectivity_label"] == "Objective", "final_sentiment"] = "neutral"
+    df_aspect.loc[df_aspect["final_subjectivity_label"] == "Objective", "final_sentiment"] = "neutral"  
+
     COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "gronlp_subjectivity_label", "final_subjectivity_label", "pipeline", "sarcasm_label", "sarcasm_flipped", "roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence", "final_sentiment", "final_confidence"]
-    df_out = pd.concat([df_overall, df_aspect, df_obj_out], ignore_index=True)
+    df_out = pd.concat([df_overall, df_aspect], ignore_index=True)
     print_summary(df_combined=df_out, df_overall=df_overall, df_aspect=df_aspect, df_objective=df_obj_out)
     return save_df(df_out, output_csv, COLS), timing_log
 

@@ -1,7 +1,7 @@
 import pandas as pd
 from sklearn.metrics import (accuracy_score, precision_recall_fscore_support, classification_report, confusion_matrix)
 
-from classification.text_preprocessing import run_text_preprocessing
+# from classification.text_preprocessing import run_text_preprocessing
 from subjectivity_detection import run_subjectivity_detection
 from sarcasm_detection import run_sarcasm_detection
 from sentiment_analysis import run_roberta_full, run_roberta_with_deberta_base, run_roberta_with_deberta_base_finetuned
@@ -257,7 +257,7 @@ def save_summary(eval_results, path=SUMMARY_XLSX):
 
 def main():
 
-    RUN_ABLATIONS = False  # Set True to run Runs 1, 2, 3 alongside the main pipeline (pipeline 3)
+    RUN_ABLATIONS = True  # Set True to run Runs 1, 2, 3 alongside the main pipeline (pipeline 3)
 
     all_summaries = []
 

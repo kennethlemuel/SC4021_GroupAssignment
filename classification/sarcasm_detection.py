@@ -38,7 +38,8 @@ class SarcasmConfig:
     '''
     sample_size: Optional[int] = None
     batch_size: int = 16
-    model_name: str = "cardiffnlp/twitter-roberta-base-irony" 
+    model_name: str = "surrey-nlp/bertweet-base-finetuned-SARC-DS"  
+    # model_name: str = "mrm8488/t5-base-finetuned-sarcasm-twitter"
     text_col: str = "cleaned_comments"
     subjectivity_col: str = "final_subjectivity_label"
     subjective_label: str = "Subjective"
@@ -62,10 +63,11 @@ class SarcasmDetector:
         Map raw model labels to project labels
         '''
         raw_label = raw_label.lower()
+        # print(raw_label)
 
-        if raw_label in {"label_1", "irony"}:
+        if raw_label in {"label_1"}:
             return "Sarcastic"
-        elif raw_label in {"label_0", "non_irony"}:
+        elif raw_label in {"label_0"}:
             return "Not Sarcastic"
 
         return f"Unknown({raw_label})"
@@ -104,7 +106,7 @@ class SarcasmDetector:
                     valid_positions.append(i)
 
             if valid_texts:
-                results = self.classifier(valid_texts, truncation=True, max_length=256)
+                results = self.classifier(valid_texts, truncation=True, max_length=128)
 
                 for pos, result in zip(valid_positions, results):
                     label = self.map_label(result["label"])
