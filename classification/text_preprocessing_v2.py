@@ -38,9 +38,9 @@ DATA_DIR = PROJ_ROOT / "data"
 
 
 # file paths 
-UNPROCESSED_CANDIDATES = DATA_DIR / "annotation_candidates.csv"
+UNPROCESSED_CANDIDATES = DATA_DIR / "comments_relevant.csv"
 OUTPUT_PREVIEW = DATA_DIR / "sample_cleaned_preview.csv"
-OUTPUT_FULL = DATA_DIR / "annotation_candidates_cleaned.csv"
+OUTPUT_FULL = DATA_DIR / "full_cleaned_comments.csv"
 
 
 @dataclass
@@ -246,15 +246,15 @@ class TextPreprocessor:
         return df
 
 
-def run_text_preprocessing():
+def run_text_preprocessing(input_csv, output_csv):
     config = PreprocessingConfig(
         sample_size=None  # use None for full dataset, reconfig for testing with different sample sizes
     )
 
     preprocessor = TextPreprocessor(config) # Set up preprocesser
 
-    logger.info(f"Loading data from {UNPROCESSED_CANDIDATES}...")
-    df = pd.read_csv(UNPROCESSED_CANDIDATES, usecols=["comment_id", "text", "comment_category"])
+    logger.info(f"Loading data from {input_csv}...")
+    df = pd.read_csv(input_csv, usecols=["comment_id", "text", "comment_category"])
     
     # Sampling dataset for testing
     if config.sample_size:
@@ -263,13 +263,12 @@ def run_text_preprocessing():
     
     df_processed = preprocessor.process_dataframe(df) # processed df
     
-    output_path = OUTPUT_PREVIEW if config.sample_size else OUTPUT_FULL
     try: 
-        logger.info(f"Saving processed data to {output_path}...")
-        df_processed.to_csv(output_path, index=False)
+        logger.info(f"Saving processed data to {output_csv}...")
+        df_processed.to_csv(output_csv, index=False)
     except PermissionError:
         # User needs to close file so it can be written to
-        logger.error(f"The file {output_path} is currently open. Please close it and run the program again.") 
+        logger.error(f"The file {output_csv} is currently open. Please close it and run the program again.") 
         return
     except Exception as e:
         logger.error(f"An error occurred while saving the file: {e}")

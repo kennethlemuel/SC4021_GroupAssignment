@@ -1,3 +1,4 @@
+import time
 import pandas as pd
 from transformers import pipeline
 from senticnet.senticnet import SenticNet
@@ -121,15 +122,20 @@ def senticnet_subjectivity(df, text_col):
 
     return df
 
+
 def run_subjectivity_detection(input_csv, output_csv, text_col):
 
     df = pd.read_csv(input_csv)
 
     print("Running GroNLP subjectivity model...")
+    t0 = time.perf_counter()
     df = gronlp_subjectivity(df, text_col)
+    gronlp_elapsed_s = round(time.perf_counter() - t0, 4)
 
     print("Running SenticNet fallback for low-confidence model predictions...")
+    t0 = time.perf_counter()
     df = senticnet_subjectivity(df, text_col)
+    senticnet_elapsed_s = round(time.perf_counter() - t0, 4)
 
     # Summary
     total = len(df)
@@ -141,10 +147,13 @@ def run_subjectivity_detection(input_csv, output_csv, text_col):
     print(f"High confidence GroNLP (no fallback): {total - fallback_count}")
     print(f"Low confidence flagged for SenticNet: {fallback_count}")
     print(f"SenticNet overrode GroNLP label: {triggered_count}")
+    print(f"\nTiming:")
+    print(f"  GroNLP model : {gronlp_elapsed_s}s ({round(total / gronlp_elapsed_s, 4) if gronlp_elapsed_s > 0 else 'N/A'} records/s)")
+    print(f"  SenticNet fallback : {senticnet_elapsed_s}s ({round(fallback_count / senticnet_elapsed_s, 4) if senticnet_elapsed_s > 0 else 'N/A'} records/s on fallback rows)")
     print(f"\nFinal label distribution:")
     print(df["final_subjectivity_label"].value_counts())
 
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
     print(f"\nSubjectivity detection completed")
 
-    return df
+    return df, gronlp_elapsed_s, senticnet_elapsed_s

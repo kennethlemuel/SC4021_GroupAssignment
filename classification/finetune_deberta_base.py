@@ -14,8 +14,8 @@ BEST_DIR = "classification/checkpoints/deberta-base-finetuned-best"
 
 MAX_LENGTH = 128 # max tokens. 80 is used by PyABSA but 128 is safer
 BATCH_SIZE = 16
-EPOCHS = 10
-LR = 0.00002
+EPOCHS = 5
+LR = 0.00001
 WEIGHT_DECAY = 0.01
 WARMUP_RATIO = 0.1
 SEED = 42
@@ -82,7 +82,7 @@ model.to(device)
 
 # 4. Build train and val datasets
 train_dataset = ABSADataset(train_df, tokenizer, MAX_LENGTH)
-val_dataset   = ABSADataset(val_df,   tokenizer, MAX_LENGTH)
+val_dataset = ABSADataset(val_df, tokenizer, MAX_LENGTH)
 
 # 5. Metrics
 def compute_metrics(eval_pred):

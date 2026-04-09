@@ -2,7 +2,7 @@
 Sarcasm Detection of subjective comments using Hugging Face pipeline.
 '''
 
-
+import time
 from pathlib import Path
 import pandas as pd
 from typing import Optional
@@ -10,6 +10,9 @@ from dataclasses import dataclass
 import logging
 from tqdm import tqdm
 from transformers import pipeline
+
+from transformers.utils import logging as hf_logging
+hf_logging.set_verbosity_error()
 
 
 # logging & progress
@@ -82,7 +85,7 @@ class SarcasmDetector:
 
         total = len(texts)
 
-        for start_index in range(0, total, self.config.batch_size):
+        for start_index in tqdm(range(0, total, self.config.batch_size), desc="Sarcasm detection", unit="batch"):
             end_index = min(start_index + self.config.batch_size, total)
 
             batch_texts = [text.strip() for text in texts[start_index:end_index]]
@@ -115,7 +118,7 @@ class SarcasmDetector:
             sarcasm_confidences.extend(batch_confidences)
             sarcasm_applied.extend(batch_applied)
 
-            logger.info(f"Sarcasm model processed {end_index}/{total}")
+            # logger.info(f"Sarcasm model processed {end_index}/{total}")
 
         df["sarcasm_label"] = sarcasm_labels
         df["sarcasm_confidence"] = sarcasm_confidences
@@ -138,7 +141,9 @@ def run_sarcasm_detection(input_csv, output_csv, text_col):
         df = df.head(config.sample_size)
 
     logger.info("Running sarcasm detection...")
+    t0 = time.perf_counter()
     df_processed = detector.detect_sarcasm(df)
+    elapsed_s = round(time.perf_counter() - t0, 4)
 
     subjective_count = (df_processed[config.subjectivity_col] == config.subjective_label).sum()
     sarcasm_count = (df_processed["sarcasm_label"] == "Sarcastic").sum()
@@ -149,6 +154,7 @@ def run_sarcasm_detection(input_csv, output_csv, text_col):
     logger.info(f"Subjective comments: {subjective_count}")
     logger.info(f"Rows sarcasm model applied to: {applied_count}")
     logger.info(f"Sarcastic comments: {sarcasm_count}")
+    logger.info(f"Sarcasm model elapsed time: {elapsed_s}s  ({round(applied_count / elapsed_s, 4) if elapsed_s > 0 else 'N/A'} records/s on subjective rows)")
 
     logger.info("Sarcasm label distribution:")
     logger.info(df_processed["sarcasm_label"].value_counts(dropna=False).to_string())
@@ -164,7 +170,7 @@ def run_sarcasm_detection(input_csv, output_csv, text_col):
         return
 
     logger.info(f"Sarcasm detection completed!")
-    return df_processed
+    return df_processed, elapsed_s
 
 
 if __name__ == "__main__":

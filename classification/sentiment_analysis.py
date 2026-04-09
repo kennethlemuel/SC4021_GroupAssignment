@@ -1,3 +1,4 @@
+import time
 import pandas as pd
 import torch
 from tqdm.auto import tqdm
@@ -27,7 +28,7 @@ def rephrase_aspect(category):
 
 def load_base_columns(input_csv):
     df = pd.read_csv(input_csv)
-    df = df[["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label"]].dropna()
+    df = df[["comment_id", "text", "cleaned_comments", "comment_category", "gronlp_subjectivity_label", "final_subjectivity_label"]].dropna()
     return df
 
 def save_df(df, output_csv, cols):
@@ -38,9 +39,9 @@ def save_df(df, output_csv, cols):
     print(f"\n  Saved {len(df)} rows → {output_csv}")
     return df[cols]
 
-def print_run_header(run_no, description):
+def print_pipeline_header(pipeline_no, description):
     print(f"\n{'━' * 65}")
-    print(f"  Run {run_no}: {description}")
+    print(f"  Sentiment Classification Pipeline {pipeline_no}: {description}")
     print(f"{'━' * 65}")
 
 def print_summary(df_combined, df_overall=None, df_aspect=None, df_objective=None):
@@ -75,6 +76,27 @@ def build_objective_rows(df_objective, extra_null_cols=None):
         for col in extra_null_cols:
             if col not in df.columns:
                 df[col] = None
+    return df
+
+# To handle sarcasm detection (polarity flip)
+POLARITY_FLIP = {"positive": "negative", "negative": "positive", "neutral": "neutral"}
+ 
+def apply_sarcasm_flip(df, sentiment_col, confidence_col):
+
+    df = df.copy()
+ 
+    is_sarcastic = df["sarcasm_label"].fillna("Not Sarcastic") == "Sarcastic"
+ 
+    df["sarcasm_flipped"] = False
+    df.loc[is_sarcastic, sentiment_col] = (
+        df.loc[is_sarcastic, sentiment_col]
+        .map(POLARITY_FLIP)
+        .fillna(df.loc[is_sarcastic, sentiment_col])  # safety: unknown labels kept as-is
+    )
+    df.loc[is_sarcastic, "sarcasm_flipped"] = True
+ 
+    n_flipped = is_sarcastic.sum()
+    print(f"  Sarcasm flip applied: {n_flipped} rows flipped out of {len(df)}")
     return df
 
 # ----- Load models -----
@@ -205,154 +227,134 @@ def apply_absa(df, tokenizer, model, sent_col, conf_col, model_name="DeBERTa", t
     df[conf_col] = all_confidences
     return df
 
-# ----- Runs -----
-# RUN 1: RoBERTa only
-def run_pipeline_1(input_csv, output_csv):
 
-    print_run_header(1, "RoBERTa only - all rows")
+# ----- Shared helper: split df into  objective / overall / aspect partitions -----
+def split_subjectivity(df):
+    df_subj = df[df["final_subjectivity_label"] == "Subjective"].copy()
+    df_obj = df[df["final_subjectivity_label"] == "Objective"].copy()
+    df_overall = df_subj[df_subj["comment_category"] == "overall"].copy()
+    df_aspect = df_subj[df_subj["comment_category"].isin(ASPECT_CATEGORIES)].copy()
+    return df_subj, df_obj, df_overall, df_aspect
+
+
+# ----- Pipelines -----
+# PIPELINE 1: RoBERTa-sentiment on all preprocessed comments (no subjectivity, no ABSA, no sarcasm) - BASELINE
+def run_roberta_full(input_csv, output_csv):
+
+    print_pipeline_header(1, "RoBERTa on all preprocessed comments")
     df = load_base_columns(input_csv)
     print(f"  Total rows: {len(df)}")
  
     roberta_pipe = load_roberta()
+
     print("  Running RoBERTa on all rows...")
-    df = apply_roberta(df, roberta_pipe, "RoBERTa-all", text_col="text")
- 
+    df = apply_roberta(df, roberta_pipe, "RoBERTa-all-preprocessed", text_col="cleaned_comments")
+
     df["pipeline"] = "roberta_only"
     df["final_sentiment"] = df["roberta_sentiment"]
     df["final_confidence"] = df["roberta_confidence"]
  
-    COLS = ["comment_id", "text", "comment_category", "final_subjectivity_label", "pipeline", "roberta_sentiment", "roberta_confidence", "final_sentiment", "final_confidence"]
+    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "pipeline", "roberta_sentiment", "roberta_confidence", "final_sentiment", "final_confidence"]
     print_summary(df_combined=df, df_overall=df)
     return save_df(df, output_csv, COLS)
 
-# RUN 2: Text preprocessing + RoBERTa
-def run_pipeline_2(input_csv, output_csv):
 
-    print_run_header(2, "Text preprocessing + RoBERTa - all rows")
+# PIPELINE 2: RoBERTa (overall) + DeBERTa-base ABSA (aspect), subjectivity: model + SenticNet fallback, sarcasm detection
+def run_roberta_with_deberta_base(input_csv, output_csv):
+
+    print_pipeline_header(2, "RoBERTa (overall) + DeBERTa-base ABSA | subjectivity | sarcasm")
     df = load_base_columns(input_csv)
-    print(f"  Total rows: {len(df)}")
+    sarcasm_col_df = pd.read_csv(input_csv, usecols=["comment_id", "sarcasm_label"])
+    df = df.merge(sarcasm_col_df, on="comment_id", how="left")
  
-    roberta_pipe = load_roberta()
-    print("  Running RoBERTa on preprocessed rows...")
-    df = apply_roberta(df, roberta_pipe, "RoBERTa-preprocessed", text_col="cleaned_comments")
- 
-    df["pipeline"] = "preprocess+roberta"
-    df["final_sentiment"] = df["roberta_sentiment"]
-    df["final_confidence"] = df["roberta_confidence"]
- 
-    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label", "pipeline", "roberta_sentiment", "roberta_confidence", "final_sentiment", "final_confidence"]
-    print_summary(df_combined=df, df_overall=df)
-    return save_df(df, output_csv, COLS)
+    _, df_obj, df_overall, df_aspect = split_subjectivity(df)
+    print(f"  Total: {len(df)}  |  Objective: {len(df_obj)}  |  Overall: {len(df_overall)}  |  Aspect: {len(df_aspect)}")
 
-# RUN 3: Text preprocessing + Subjectivity detection + RoBERTa
-def run_pipeline_3(input_csv, output_csv):
-
-    print_run_header(3, "Text preprocessing + subjectivity detection + RoBERTa (subjective only)")
-    df = load_base_columns(input_csv)
- 
-    df_subj = df[df["final_subjectivity_label"] == "Subjective"].copy()
-    df_obj = df[df["final_subjectivity_label"] == "Objective"].copy()
-    print(f"  Total: {len(df)}  |  Subjective: {len(df_subj)}  |  Objective: {len(df_obj)}")
- 
-    # Objective -> neutral (no model)
-    df_obj_out = build_objective_rows(df_obj, extra_null_cols=["roberta_sentiment", "roberta_confidence"])
- 
-    # Subjective -> RoBERTa
-    roberta_pipe = load_roberta()
-    print("  Running RoBERTa on subjective rows...")
-    df_subj = apply_roberta(df_subj, roberta_pipe, "RoBERTa-subjective", text_col="cleaned_comments")
-    df_subj["pipeline"] = "preprocess+subjectivity+roberta"
-    df_subj["final_sentiment"] = df_subj["roberta_sentiment"]
-    df_subj["final_confidence"] = df_subj["roberta_confidence"]
- 
-    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label", "pipeline", "roberta_sentiment", "roberta_confidence", "final_sentiment", "final_confidence"]
-    df_out = pd.concat([df_subj, df_obj_out], ignore_index=True)
-    print_summary(df_combined=df_out, df_overall=df_subj, df_objective=df_obj_out)
-    return save_df(df_out, output_csv, COLS)
-
-# RUN 4: Text preprocessing + Subjectivity detection + RoBERTa (overall) + DeBERTa-base (ABSA)
-def run_pipeline_4(input_csv, output_csv):
-
-    print_run_header(4, "Full hybrid: RoBERTa (overall) + DeBERTa-base ABSA (aspect)")
-    df = load_base_columns(input_csv)
- 
-    df_subj = df[df["final_subjectivity_label"] == "Subjective"].copy()
-    df_obj = df[df["final_subjectivity_label"] == "Objective"].copy()
-    df_overall = df_subj[df_subj["comment_category"] == "overall"].copy()
-    df_aspect  = df_subj[df_subj["comment_category"].isin(ASPECT_CATEGORIES)].copy()
-    print(f"  Total: {len(df)}  |  Objective: {len(df_obj)} |  Overall: {len(df_overall)} |  Aspect: {len(df_aspect)}")
- 
     roberta_pipe = load_roberta()
     base_tokenizer, base_model = load_deberta_base()
- 
+
     # Objective -> neutral
     df_obj_out = build_objective_rows(df_obj, extra_null_cols=["roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_sentiment", "deberta_base_confidence"])
  
     # Overall -> RoBERTa
     print("  Running RoBERTa on overall rows...")
     df_overall = apply_roberta(df_overall, roberta_pipe, "RoBERTa-overall", text_col="cleaned_comments")
-    df_overall["pipeline"] = "preprocess+subjectivity+roberta"
+    df_overall["pipeline"] = "roberta+deberta-base"
     df_overall["aspect_input"] = "overall"
     df_overall["deberta_base_sentiment"] = "N/A"
     df_overall["deberta_base_confidence"] = None
     df_overall["final_sentiment"] = df_overall["roberta_sentiment"]
     df_overall["final_confidence"] = df_overall["roberta_confidence"]
- 
+    print("  Applying sarcasm polarity flip to overall rows...")
+    df_overall = apply_sarcasm_flip(df_overall, sentiment_col="final_sentiment", confidence_col="final_confidence")
+
     # Aspect -> DeBERTa-base ABSA
     df_aspect["aspect_input"] = df_aspect["comment_category"].apply(rephrase_aspect)
     print("  Running DeBERTa-base ABSA on aspect rows...")
     df_aspect = apply_absa(df_aspect, base_tokenizer, base_model, "deberta_base_sentiment", "deberta_base_confidence", "DeBERTa-base", text_col="cleaned_comments")
-    df_aspect["pipeline"] = "preprocess+subjectivity+absa_base"
+    df_aspect["pipeline"] = "roberta+deberta-base"
     df_aspect["roberta_sentiment"] = "N/A"
     df_aspect["roberta_confidence"] = None
     df_aspect["final_sentiment"] = df_aspect["deberta_base_sentiment"]
     df_aspect["final_confidence"] = df_aspect["deberta_base_confidence"]
- 
-    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label", "pipeline", "roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_sentiment", "deberta_base_confidence", "final_sentiment", "final_confidence"]
+    print("  Applying sarcasm polarity flip to aspect rows...")
+    df_aspect = apply_sarcasm_flip(df_aspect, sentiment_col="final_sentiment", confidence_col="final_confidence")
+
+    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label", "pipeline", "sarcasm_label", "sarcasm_flipped", "roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_sentiment", "deberta_base_confidence", "final_sentiment", "final_confidence"]
     df_out = pd.concat([df_overall, df_aspect, df_obj_out], ignore_index=True)
     print_summary(df_combined=df_out, df_overall=df_overall, df_aspect=df_aspect, df_objective=df_obj_out)
     return save_df(df_out, output_csv, COLS)
 
-# RUN 5: Text preprocessing + Subjectivity detection + RoBERTa (overall) + DeBERTa-base-finetuned (ABSA)
-def run_pipeline_5(input_csv, output_csv):
 
-    print_run_header(5, "Full hybrid: RoBERTa (overall) + DeBERTa-base-finetuned ABSA (aspect)")
+# PIPELINE 3: RoBERTa (overall) + DeBERTa-base-finetuned ABSA (aspect), subjectivity: model + SenticNet fallback, sarcasm detection
+def run_roberta_with_deberta_base_finetuned(input_csv, output_csv):
+
+    print_pipeline_header(3, "RoBERTa (overall) + DeBERTa-base-finetuned ABSA | subjectivity + sarcasm")
     df = load_base_columns(input_csv)
+    sarcasm_col_df = pd.read_csv(input_csv, usecols=["comment_id", "sarcasm_label"])
+    df = df.merge(sarcasm_col_df, on="comment_id", how="left")
  
-    df_subj = df[df["final_subjectivity_label"] == "Subjective"].copy()
-    df_obj = df[df["final_subjectivity_label"] == "Objective"].copy()
-    df_overall = df_subj[df_subj["comment_category"] == "overall"].copy()
-    df_aspect = df_subj[df_subj["comment_category"].isin(ASPECT_CATEGORIES)].copy()
+    _, df_obj, df_overall, df_aspect = split_subjectivity(df)
     print(f"  Total: {len(df)}  |  Objective: {len(df_obj)}  |  Overall: {len(df_overall)}  |  Aspect: {len(df_aspect)}")
  
+    timing_log = []
+ 
     roberta_pipe = load_roberta()
-    finetuned_base_tokenizer, finetuned_base_model  = load_deberta_finetuned()
+    finetuned_tokenizer, finetuned_model = load_deberta_finetuned()
  
-    # Objective -> neutral
-    df_obj_out = build_objective_rows(df_obj, extra_null_cols=["roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence"])
+    # Objective -> neutral (sarcasm flip not applied to rule-assigned rows)
+    df_obj_out = build_objective_rows(df_obj, extra_null_cols=["roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence", "sarcasm_label", "sarcasm_flipped"])
  
-    # Overall -> RoBERTa
+    # Overall -> RoBERTa -> sarcasm flip
     print("  Running RoBERTa on overall rows...")
+    t0 = time.perf_counter()
     df_overall = apply_roberta(df_overall, roberta_pipe, "RoBERTa-overall", text_col="cleaned_comments")
-    df_overall["pipeline"] = "preprocessing+subjectivity+roberta"
+    timing_log.append({"stage": "RoBERTa (overall)", "records": len(df_overall), "elapsed_s": round(time.perf_counter() - t0, 4)})
+    df_overall["pipeline"] = "roberta+deberta-base-finetuned"
     df_overall["aspect_input"] = "overall"
     df_overall["deberta_base_finetuned_sentiment"] = "N/A"
     df_overall["deberta_base_finetuned_confidence"] = None
     df_overall["final_sentiment"] = df_overall["roberta_sentiment"]
     df_overall["final_confidence"] = df_overall["roberta_confidence"]
+    print("  Applying sarcasm polarity flip to overall rows...")
+    df_overall = apply_sarcasm_flip(df_overall, sentiment_col="final_sentiment", confidence_col="final_confidence")
  
-    # Aspect → fine-tuned DeBERTa-base ABSA
+    # Aspect -> DeBERTa-base-finetuned ABSA -> sarcasm flip
     df_aspect["aspect_input"] = df_aspect["comment_category"].apply(rephrase_aspect)
     print("  Running DeBERTa-base-finetuned ABSA on aspect rows...")
-    df_aspect = apply_absa(df_aspect, finetuned_base_tokenizer, finetuned_base_model, "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence", "DeBERTa-base-finetuned", text_col="cleaned_comments")
-    df_aspect["pipeline"] = "preprocessing+subjectivity+absa_finetuned"
+    t0 = time.perf_counter()
+    df_aspect = apply_absa(df_aspect, finetuned_tokenizer, finetuned_model, "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence", "DeBERTa-base-finetuned", text_col="cleaned_comments")
+    timing_log.append({"stage": "DeBERTa-base-finetuned ABSA (aspect)", "records": len(df_aspect), "elapsed_s": round(time.perf_counter() - t0, 4)})
+    df_aspect["pipeline"] = "roberta+deberta-base-finetuned"
     df_aspect["roberta_sentiment"] = "N/A"
     df_aspect["roberta_confidence"] = None
     df_aspect["final_sentiment"] = df_aspect["deberta_base_finetuned_sentiment"]
     df_aspect["final_confidence"] = df_aspect["deberta_base_finetuned_confidence"]
+    print("  Applying sarcasm polarity flip to aspect rows...")
+    df_aspect = apply_sarcasm_flip(df_aspect, sentiment_col="final_sentiment", confidence_col="final_confidence")
  
-    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "final_subjectivity_label", "pipeline", "roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence", "final_sentiment", "final_confidence"]
+    COLS = ["comment_id", "text", "cleaned_comments", "comment_category", "gronlp_subjectivity_label", "final_subjectivity_label", "pipeline", "sarcasm_label", "sarcasm_flipped", "roberta_sentiment", "roberta_confidence", "aspect_input", "deberta_base_finetuned_sentiment", "deberta_base_finetuned_confidence", "final_sentiment", "final_confidence"]
     df_out = pd.concat([df_overall, df_aspect, df_obj_out], ignore_index=True)
     print_summary(df_combined=df_out, df_overall=df_overall, df_aspect=df_aspect, df_objective=df_obj_out)
-    return save_df(df_out, output_csv, COLS)
+    return save_df(df_out, output_csv, COLS), timing_log
 
