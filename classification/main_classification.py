@@ -1,13 +1,13 @@
 import pandas as pd
 from sklearn.metrics import (accuracy_score, precision_recall_fscore_support, classification_report, confusion_matrix)
 
-# from classification.text_preprocessing import run_text_preprocessing
+from text_preprocessing import run_text_preprocessing
 from subjectivity_detection import run_subjectivity_detection
 from sarcasm_detection import run_sarcasm_detection
-from sentiment_analysis import run_roberta_full, run_roberta_with_deberta_base, run_roberta_with_deberta_base_finetuned
+from sentiment_analysis import run_roberta_only, run_roberta_with_deberta_base_finetuned_no_subjectivity_no_sarcasm, run_roberta_with_deberta_base, run_roberta_with_deberta_base_finetuned_final
 
-RAW_CSV = "data/annotation_candidates.csv"
-PREPROCESSED_CSV = "data/annotation_candidates_cleaned.csv"
+RAW_CSV = "data/comments_relevant.csv"
+PREPROCESSED_CSV = "data/comments_relevant_cleaned.csv"
 SUBJECTIVITY_CSV = "data/subjectivity_detection_results.csv"
 SARCASM_CSV = "data/sarcasm_detection_results.csv"
 
@@ -16,7 +16,7 @@ RUN1_CSV = "data/sentiment_analysis_results_run1.csv"
 RUN2_CSV = "data/sentiment_analysis_results_run2.csv"
 RUN3_CSV = "data/sentiment_analysis_results_run3.csv"
 RUN4_CSV = "data/sentiment_analysis_results_run4.csv"
-RUN5_CSV = "data/final_sentiment_analysis_results.csv"
+RUN5_CSV = "data/full_sentiment_analysis_results.csv"
 TEST_RUN_CSV = "data/sentiment_analysis_results_test_run.csv"
 
 # Summary outputs
@@ -53,29 +53,25 @@ def run_sarcasm(input_csv, output_csv, input_text_col = "cleaned_comments"):
 def derive_ablation_predictions(run5_csv, subjectivity_mode="hybrid", apply_sarcasm_flip=False):
     """
     subjectivity_mode:
-      - "none" -> no subjectivity filtering (Run 2)
       - "model" -> use gronlp_subjectivity_label only (Run 3)
       - "hybrid" -> use final_subjectivity_label (model + SenticNet fallback) (Run 4)
     """
 
     df = pd.read_csv(run5_csv)
 
-    if subjectivity_mode not in {"none", "model", "hybrid"}:
+    if subjectivity_mode not in {"model", "hybrid"}:
         raise ValueError(f"Unsupported subjectivity_mode: {subjectivity_mode}")
 
     if subjectivity_mode == "model":
         subj_col = "gronlp_subjectivity_label"
-        df[subj_col] = df[subj_col].fillna("Objective").astype(str).str.strip()
-    elif subjectivity_mode == "hybrid":
-        subj_col = "final_subjectivity_label"
-        df[subj_col] = df[subj_col].fillna("Objective").astype(str).str.strip()
     else:
-        subj_col = None
+        subj_col = "final_subjectivity_label"
 
     derived = []
 
     for _, row in df.iterrows():
-        if subj_col is not None and str(row.get(subj_col, "Objective")).strip() != "Subjective":
+        # Rows not marked Subjective are rule-assigned neutral
+        if str(row.get(subj_col, "Objective")).strip() != "Subjective":
             derived.append("neutral")
             continue
 
@@ -266,21 +262,21 @@ def main():
 
 
     # --- Preprocessing before sentiment classification (run once, then comment out) ---
-    # print("\n[1/4] Running text preprocessing...")
-    # run_text_preprocessing(input_csv=RAW_CSV, output_csv=PREPROCESSED_CSV)
+    print("\n[1/4] Running text preprocessing...")
+    run_text_preprocessing(input_csv=RAW_CSV, output_csv=PREPROCESSED_CSV)
 
-    # print("\n[2/4] Running subjectivity detection (model + SenticNet)...")
-    # preproc_timing["subjectivity_senticnet"] = run_subjectivity(input_csv=PREPROCESSED_CSV, output_csv=SUBJECTIVITY_CSV)
+    print("\n[2/4] Running subjectivity detection (model + SenticNet)...")
+    preproc_timing["subjectivity_senticnet"] = run_subjectivity(input_csv=PREPROCESSED_CSV, output_csv=SUBJECTIVITY_CSV)
 
-    # print("\n[3/4] Running sarcasm detection...")
-    # preproc_timing["sarcasm"] = run_sarcasm(input_csv=SUBJECTIVITY_CSV, output_csv=SARCASM_CSV)
+    print("\n[3/4] Running sarcasm detection...")
+    preproc_timing["sarcasm"] = run_sarcasm(input_csv=SUBJECTIVITY_CSV, output_csv=SARCASM_CSV)
 
 
     # --- Final Sentiment Classification Pipeline: Pipeline 3 (Run 5 in ablation) ---
     print("\n[4/4] Running sentiment analysis pipeline...")
 
     # RoBERTa for general sentiment analysis + DeBERTa-base-finetuned ABSA + subjectivity (model + SenticNet fallback) + sarcasm detection
-    _, timing = run_roberta_with_deberta_base_finetuned(input_csv=SARCASM_CSV, output_csv=RUN5_CSV)
+    _, timing = run_roberta_with_deberta_base_finetuned_final(input_csv=SARCASM_CSV, output_csv=RUN5_CSV)
     s = evaluate_run("Run5_RoBERTa_DeBERTaBase_finetuned_subjectivity_hybrid_sarcasm", pred_csv=RUN5_CSV)
     if s:
         all_summaries.append(s)
@@ -293,20 +289,15 @@ def main():
 
         # RUN 1: Normal sentiment analysis
         # RoBERTa for general sentiment analysis on all preprocessed comments
-        run_roberta_full(input_csv=SARCASM_CSV, output_csv=RUN1_CSV)
+        run_roberta_only(input_csv=SARCASM_CSV, output_csv=RUN1_CSV)
         s = evaluate_run("Run1_RoBERTa_all_preprocessed", pred_csv=RUN1_CSV)
         if s:
             all_summaries.append(s)
 
         # RUN 2: + ABSA (using deberta-base-finetuned)
-        # RoBERTa for overall preprocessed comments + DeBERTa-base-finetuned ABSA, no subjectivity detection and no sarcasm detection (Derived from Pipeline 3/Run 4 output)
-        predictions_run2 = derive_ablation_predictions(
-            RUN5_CSV,
-            subjectivity_mode="none",
-            apply_sarcasm_flip=False,
-        ).rename(columns={"derived_sentiment": "ablation_sentiment_run2"})
-        predictions_run2.to_csv(RUN2_CSV, index=False)
-        s = evaluate_run("Run2_RoBERTa_DeBERTaBase_finetuned_no_subjectivity_no_sarcasm", pred_csv=RUN2_CSV, pred_col="ablation_sentiment_run2")
+        # RoBERTa for overall preprocessed comments + DeBERTa-base-finetuned ABSA, no subjectivity detection and no sarcasm detection
+        run_roberta_with_deberta_base_finetuned_no_subjectivity_no_sarcasm(input_csv=SARCASM_CSV, output_csv=RUN2_CSV)
+        s = evaluate_run("Run2_RoBERTa_DeBERTaBase_finetuned_no_subjectivity_no_sarcasm", pred_csv=RUN2_CSV)
         if s:
             all_summaries.append(s)
 
@@ -335,7 +326,7 @@ def main():
             all_summaries.append(s)
 
         # TEST RUN (not part of ablation, for comparison between deberta-base vs deberta-base-finetuned)
-        # Pipeline 2: RoBERTa for general sentiment analysis + DeBERTa-base ABSA + subjectivity (model + SenticNet fallback) + sarcasm detection
+        # RoBERTa for general sentiment analysis + DeBERTa-base ABSA + subjectivity (model + SenticNet fallback) + sarcasm detection
         run_roberta_with_deberta_base(input_csv=SARCASM_CSV, output_csv=TEST_RUN_CSV)
         s = evaluate_run("TestRun_RoBERTa_DeBERTaBase_subjectivity_hybrid_sarcasm", pred_csv=TEST_RUN_CSV)
         if s:
