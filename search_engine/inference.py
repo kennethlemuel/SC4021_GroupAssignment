@@ -32,7 +32,10 @@ def _bucket_alias_token_sequences(bucket: str) -> list[list[str]]:
     aliases: list[list[str]] = [tokens]
     if tokens[0] in GENERIC_MODEL_PREFIXES and len(tokens) > 1:
         core = tokens[1:]
-        if any(any(ch.isdigit() for ch in t) for t in core):
+        # Avoid numeric-only aliases like "15" that can incorrectly match across brands.
+        has_digit = any(any(ch.isdigit() for ch in t) for t in core)
+        has_alpha = any(any(ch.isalpha() for ch in t) for t in core)
+        if has_digit and has_alpha:
             aliases.append(core)
 
     unique: list[list[str]] = []
