@@ -4,7 +4,8 @@
 
 - data/comments_clean.csv: cleaned full corpus
 - data/comments_relevant.csv: filtered corpus used by the search engine
-- data/annotation_candidates.csv: annotation set from corpus
+- data/annotation_candidates.csv: annotation set from corpus for manual annotation
+- data/annotated_evaluation_set.csv: final annotated dataset for evaluation
 - data/seed_videos.csv: selected seed videos
 - logs/crawl_errors.csv: crawl errors for debugging purposes
 
