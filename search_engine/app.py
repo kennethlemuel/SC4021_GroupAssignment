@@ -178,8 +178,6 @@ def main():
             all_buckets,
             mapped_family_for_bucket,
         )
-        if normalized_query_text != effective_query_text:
-            applied_rules.append(f"Query normalized -> {normalized_query_text}")
 
     if applied_rules:
         lines = "".join(f"<div style='margin:1px 0;'>{html.escape(rule)}</div>" for rule in applied_rules)
