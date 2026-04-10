@@ -16,6 +16,7 @@ from .inference import (
     infer_category_from_query,
     infer_family_from_query,
     infer_unknown_model_from_query,
+    normalize_query_to_canonical_model,
 )
 from .indexing import get_index, search
 from .ranking import apply_filters, get_brand_model_mappings
@@ -168,6 +169,18 @@ def main():
     if inferred_unknown_model is not None:
         applied_rules.append(f"Out-of-scope model detected -> {inferred_unknown_model}")
 
+    normalized_query_text = effective_query_text
+    if inferred_bucket is not None and effective_query_text.strip():
+        mapped_family_for_bucket = bucket_to_family.get(inferred_bucket)
+        normalized_query_text = normalize_query_to_canonical_model(
+            effective_query_text,
+            inferred_bucket,
+            all_buckets,
+            mapped_family_for_bucket,
+        )
+        if normalized_query_text != effective_query_text:
+            applied_rules.append(f"Query normalized -> {normalized_query_text}")
+
     if applied_rules:
         lines = "".join(f"<div style='margin:1px 0;'>{html.escape(rule)}</div>" for rule in applied_rules)
         st.markdown(
@@ -189,10 +202,10 @@ def main():
         )
         search_df = df.iloc[0:0].copy()
         search_df["score"] = pd.Series(dtype=float)
-    elif effective_query_text.strip():
+    elif normalized_query_text.strip():
         search_df, _search_latency_ms = search(
             ix,
-            effective_query_text,
+            normalized_query_text,
             limit=SEARCH_LIMIT,
             category=effective_category,
             sentiment=selected_sentiment,
@@ -216,7 +229,7 @@ def main():
         enable_date_filter,
         selected_start_date,
         selected_end_date,
-        effective_query_text,
+        normalized_query_text,
     )
 
     latency_ms = (time.perf_counter() - query_start) * 1000.0
@@ -244,8 +257,8 @@ def main():
             unsafe_allow_html=True,
         )
 
-    if effective_query_text.strip():
-        query_label = effective_query_text
+    if normalized_query_text.strip():
+        query_label = normalized_query_text
     else:
         facet_parts: list[str] = []
         if selected_family != "All":
@@ -309,4 +322,5 @@ def main():
                     selected_end_date,
                     all_buckets,
                     all_families,
+                    bucket_to_family,
                 )

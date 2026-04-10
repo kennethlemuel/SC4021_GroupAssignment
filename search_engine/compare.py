@@ -8,7 +8,13 @@ import streamlit as st
 
 from .charts import sentiment_counts
 from .config import SEARCH_LIMIT
-from .inference import infer_unknown_model_from_query
+from .inference import (
+    infer_bucket_from_query,
+    infer_category_from_query,
+    infer_family_from_query,
+    infer_unknown_model_from_query,
+    normalize_query_to_canonical_model,
+)
 from .indexing import search
 from .ranking import apply_filters
 
@@ -28,6 +34,7 @@ def render_sentiment_comparison(
     end_date: date | None,
     all_buckets: list[str],
     all_families: list[str],
+    bucket_to_family: dict[str, str],
 ):
     unknown_a = infer_unknown_model_from_query(query_a, all_buckets, all_families)
     unknown_b = infer_unknown_model_from_query(query_b, all_buckets, all_families)
@@ -41,11 +48,59 @@ def render_sentiment_comparison(
         st.warning(" ".join(messages))
         return
 
+    inferred_bucket_a = infer_bucket_from_query(query_a, all_buckets)
+    inferred_bucket_b = infer_bucket_from_query(query_b, all_buckets)
+    inferred_family_a = infer_family_from_query(query_a, all_families)
+    inferred_family_b = infer_family_from_query(query_b, all_families)
+    inferred_category_a = infer_category_from_query(query_a)
+    inferred_category_b = infer_category_from_query(query_b)
+
+    normalized_query_a = normalize_query_to_canonical_model(
+        query_a,
+        inferred_bucket_a or "",
+        all_buckets,
+        bucket_to_family.get(inferred_bucket_a or "") or inferred_family_a,
+    )
+    normalized_query_b = normalize_query_to_canonical_model(
+        query_b,
+        inferred_bucket_b or "",
+        all_buckets,
+        bucket_to_family.get(inferred_bucket_b or "") or inferred_family_b,
+    )
+
+    effective_family_a = family
+    effective_family_b = family
+    effective_bucket_a = bucket
+    effective_bucket_b = bucket
+    effective_category_a = category
+    effective_category_b = category
+
+    if inferred_bucket_a is not None:
+        effective_bucket_a = inferred_bucket_a
+        mapped_family_a = bucket_to_family.get(inferred_bucket_a)
+        if mapped_family_a is not None:
+            effective_family_a = mapped_family_a
+    if inferred_bucket_b is not None:
+        effective_bucket_b = inferred_bucket_b
+        mapped_family_b = bucket_to_family.get(inferred_bucket_b)
+        if mapped_family_b is not None:
+            effective_family_b = mapped_family_b
+
+    if inferred_family_a is not None:
+        effective_family_a = inferred_family_a
+    if inferred_family_b is not None:
+        effective_family_b = inferred_family_b
+
+    if inferred_category_a is not None:
+        effective_category_a = inferred_category_a
+    if inferred_category_b is not None:
+        effective_category_b = inferred_category_b
+
     q1_df, _ = search(
         ix,
-        query_a,
+        normalized_query_a,
         limit=SEARCH_LIMIT,
-        category=category,
+        category=effective_category_a,
         sentiment=sentiment,
         include_replies=include_replies,
         enable_date_filter=enable_date_filter,
@@ -54,9 +109,9 @@ def render_sentiment_comparison(
     )
     q2_df, _ = search(
         ix,
-        query_b,
+        normalized_query_b,
         limit=SEARCH_LIMIT,
-        category=category,
+        category=effective_category_b,
         sentiment=sentiment,
         include_replies=include_replies,
         enable_date_filter=enable_date_filter,
@@ -66,29 +121,29 @@ def render_sentiment_comparison(
 
     q1_filtered = apply_filters(
         q1_df,
-        family,
-        bucket,
-        category,
+        effective_family_a,
+        effective_bucket_a,
+        effective_category_a,
         sentiment,
         aspect,
         include_replies,
         enable_date_filter,
         start_date,
         end_date,
-        query_a,
+        normalized_query_a,
     )
     q2_filtered = apply_filters(
         q2_df,
-        family,
-        bucket,
-        category,
+        effective_family_b,
+        effective_bucket_b,
+        effective_category_b,
         sentiment,
         aspect,
         include_replies,
         enable_date_filter,
         start_date,
         end_date,
-        query_b,
+        normalized_query_b,
     )
 
     q1_total = len(q1_filtered)
@@ -141,4 +196,4 @@ def render_sentiment_comparison(
             "Difference (B - A)": [q2_pos - q1_pos, q2_neg - q1_neg, net_b - net_a],
         }
     )
-    st.dataframe(delta_df, width="stretch", hide_index=True)
+    st.dataframe(delta_df, use_container_width=True, hide_index=True)
