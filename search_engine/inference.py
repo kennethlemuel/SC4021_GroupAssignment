@@ -4,6 +4,7 @@ import re
 
 
 PREMIUM_SUFFIXES = ("pro", "max", "plus", "ultra", "mini", "fold", "flip", "edge", "fe")
+MODEL_SUFFIXES = PREMIUM_SUFFIXES + ("e",)
 GENERIC_MODEL_PREFIXES = {"galaxy", "iphone", "pixel", "xiaomi", "redmi", "mi"}
 
 
@@ -161,7 +162,7 @@ def infer_family_from_query(query_text: str, all_families: list[str]) -> str | N
         # like "iphone16" / "galaxys26" so scope checks can trigger early.
         standalone = any(re.search(rf"\b{re.escape(alias)}\b", q) for alias in aliases)
         fused_model = any(
-            re.search(rf"\b{re.escape(alias)}\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:{'|'.join(PREMIUM_SUFFIXES)}))?\b", q)
+            re.search(rf"\b{re.escape(alias)}\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:{'|'.join(MODEL_SUFFIXES)}))?\b", q)
             for alias in aliases
         )
 
@@ -224,10 +225,14 @@ def infer_unknown_model_from_query(
     }
     lowered = q.casefold()
     aliases = alias_map.get(inferred_family.casefold(), [inferred_family.casefold()])
+    suffix_expr = "|".join(re.escape(s) for s in MODEL_SUFFIXES)
 
     has_model_number = bool(
-        re.search(r"\b(?:\d{1,3}|[a-z]\d{1,3})\b", lowered)
-        or any(re.search(rf"\b{re.escape(alias)}\W*[a-z]?\W*\d{{1,3}}\b", lowered) for alias in aliases)
+        re.search(rf"\b(?:\d{{1,3}}|[a-z]\d{{1,3}})(?:\W*(?:{suffix_expr}))?\b", lowered)
+        or any(
+            re.search(rf"\b{re.escape(alias)}\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:{suffix_expr}))?\b", lowered)
+            for alias in aliases
+        )
     )
     if not has_model_number:
         return None
@@ -235,8 +240,8 @@ def infer_unknown_model_from_query(
     alias_expr = "|".join(re.escape(a) for a in aliases)
 
     candidate_patterns = [
-        rf"\b(?:{alias_expr})\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:pro|max|plus|ultra|mini|fold|flip|edge|fe))?\b",
-        r"\b[a-z]\d{1,3}(?:\W*(?:pro|max|plus|ultra|mini|fold|flip|edge|fe))?\b",
+        rf"\b(?:{alias_expr})\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:{suffix_expr}))?\b",
+        rf"\b[a-z]\d{{1,3}}(?:\W*(?:{suffix_expr}))?\b",
     ]
     for pattern in candidate_patterns:
         match = re.search(pattern, lowered, flags=re.IGNORECASE)
