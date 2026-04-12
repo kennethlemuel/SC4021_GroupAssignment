@@ -8,7 +8,6 @@ plotly
 wordcloud
 matplotlib
 ftfy
-unicodedata
 emoji
 torch
 transformers
