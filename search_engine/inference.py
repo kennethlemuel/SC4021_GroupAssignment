@@ -157,7 +157,15 @@ def infer_family_from_query(query_text: str, all_families: list[str]) -> str | N
     for family in all_families:
         aliases = _family_aliases(family)
 
-        if any(re.search(rf"\b{re.escape(alias)}\b", q) for alias in aliases):
+        # Match both standalone aliases ("iphone") and fused model forms
+        # like "iphone16" / "galaxys26" so scope checks can trigger early.
+        standalone = any(re.search(rf"\b{re.escape(alias)}\b", q) for alias in aliases)
+        fused_model = any(
+            re.search(rf"\b{re.escape(alias)}\W*[a-z]?\W*\d{{1,3}}(?:\W*(?:{'|'.join(PREMIUM_SUFFIXES)}))?\b", q)
+            for alias in aliases
+        )
+
+        if standalone or fused_model:
             matches.append(family)
 
     unique_matches = sorted(set(matches))
@@ -208,18 +216,22 @@ def infer_unknown_model_from_query(
     if inferred_family is None:
         return None
 
-    lowered = q.casefold()
-    has_model_number = bool(re.search(r"\b(?:\d{1,3}|[a-z]\d{1,3})\b", lowered))
-    if not has_model_number:
-        return None
-
     alias_map = {
         "apple": ["iphone", "ios", "apple"],
         "samsung": ["galaxy", "samsung"],
         "google": ["pixel", "google"],
         "xiaomi": ["xiaomi", "mi", "redmi"],
     }
+    lowered = q.casefold()
     aliases = alias_map.get(inferred_family.casefold(), [inferred_family.casefold()])
+
+    has_model_number = bool(
+        re.search(r"\b(?:\d{1,3}|[a-z]\d{1,3})\b", lowered)
+        or any(re.search(rf"\b{re.escape(alias)}\W*[a-z]?\W*\d{{1,3}}\b", lowered) for alias in aliases)
+    )
+    if not has_model_number:
+        return None
+
     alias_expr = "|".join(re.escape(a) for a in aliases)
 
     candidate_patterns = [
